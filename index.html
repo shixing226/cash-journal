@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-09-22-speed-1">
+  <meta name="app-version" content="2026-09-26-continuous-1">
   <style>
     :root{--brand:#5e9ca0;--brand-dark:#36787c;--brand-soft:#e8f4f3;--ink:#243436;--muted:#718082;--line:#dce8e7;--paper:#ffffff;--bg:#f5f8f8;--income:#6eaa55;--expense:#dc7474;--shadow:0 14px 36px rgba(42,73,74,.09);--radius:18px}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 100% 0,#e9f5f3 0,transparent 33%),linear-gradient(135deg,#f8fafb,#f1f6f5);color:var(--ink);font:14px/1.5 "Microsoft YaHei",system-ui,-apple-system,sans-serif}
@@ -41,6 +41,7 @@
     <input id="search" type="search" name="ledger-search" autocomplete="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" placeholder="搜索摘要、备注、单位、分类或金额">
     <div class="seg" id="scopeSeg"><button class="active" data-scope="month">本月</button><button data-scope="all">全部历史</button></div>
   </section>
+  <p class="meta" id="balanceOrderNote" title="列表按日期、系统录入时间和固定编号倒序；录入时间缺失的在前，并列按固定编号。逐笔余额按相反顺序累计。">同日按系统录入顺序排列，并列按固定编号；逐笔余额从早到晚累计，可能与原表行序不同。</p>
   <section class="tablebox">
     <table><thead><tr><th>日期/时间</th><th>类型</th><th>摘要</th><th class="num">收入</th><th class="num">支出</th><th class="num">余额</th><th>操作</th></tr></thead><tbody id="rows"></tbody></table>
     <div class="empty" id="empty">正在加载…</div>
@@ -79,7 +80,7 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 let db=null,clientPromise=null,authPromise=null;
 const S={records:[],rules:[],scope:'month',type:'all',page:0,pageSize:500,total:0,summary:null,user:null,editing:null,timer:null,recordsRequestId:0,summaryRequestId:0,authEpoch:0,imageUrls:[],imageIndex:0,saving:false,authPending:true,ledgerRequested:false,ledgerLoaded:false,recordState:'idle',summaryState:'idle',summaryMonth:'',exporting:false};
 const $=id=>document.getElementById(id), money=n=>'¥'+Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
-const scripts=new Map(),CACHE_PREFIX='cash-v2-view-2:',CACHE_TTL=15*60*1000;
+const scripts=new Map(),CACHE_PREFIX='cash-v2-view-3:',CACHE_TTL=15*60*1000;
 function loadScript(src,globalName){
   if(window[globalName])return Promise.resolve(window[globalName]);
   if(scripts.has(src))return scripts.get(src);
@@ -142,17 +143,17 @@ async function loadRecords(){
   let term=$('search').value.trim(),b=bounds();if(S.scope==='month')q=q.gte('date',b.start).lt('date',b.end);
   if(S.type!=='all')q=q.eq('type',S.type);
   if(term){let safe=term.replace(/[,%()]/g,' '),amountTerm=term.replace(/[¥￥,\s]/g,'');let filters=[`summary.ilike.%${safe}%`,`remark.ilike.%${safe}%`,`partner.ilike.%${safe}%`,`category.ilike.%${safe}%`];if(/^\d+(\.\d{1,2})?$/.test(amountTerm))filters.push(`amount.eq.${amountTerm}`);q=q.or(filters.join(','))}
-  try{let from=S.page*S.pageSize,{data,error,count}=await q.order('date',{ascending:false}).order('created_at',{ascending:false}).range(from,from+S.pageSize-1).abortSignal(S.recordsAbort.signal);if(requestId!==S.recordsRequestId||epoch!==S.authEpoch||key!==recordsKey())return;if(error)throw error;S.records=data||[];S.total=count||0;S.recordState='fresh';writeCache('records',key,{records:S.records,total:S.total})}
+  try{let from=S.page*S.pageSize,{data,error,count}=await q.order('date',{ascending:false}).order('created_at',{ascending:false}).order('id',{ascending:false}).range(from,from+S.pageSize-1).abortSignal(S.recordsAbort.signal);if(requestId!==S.recordsRequestId||epoch!==S.authEpoch||key!==recordsKey())return;if(error)throw error;S.records=data||[];S.total=count||0;S.recordState='fresh';writeCache('records',key,{records:S.records,total:S.total})}
   catch{if(requestId!==S.recordsRequestId||epoch!==S.authEpoch||key!==recordsKey())return;S.recordState=cached?'cached-error':'error'}
   render();if(S.recordState==='error')$('empty').textContent='账目未加载成功，请点击重试';dataStatus();
 }
-function renderRecordRow(r){let imgs=parseImages(r.image_url),sg=suggest(r.summary),p=r.partner||sg.partner,c=r.category||sg.category,isIncome=r.type==='income',isOpening=marker(r.summary),typeText=isIncome?'收入':'支出',amountText=!isOpening?money(r.amount):'—',balanceText=r._balance==null?'—':money(r._balance),tags=`${p?`<span class="tag">${esc(p)}</span>`:''}${c?`<span class="tag">${esc(c)}</span>`:''}`,attachment=imgs.length?`<button class="attachment" data-images="${esc(JSON.stringify(imgs))}">📎 ${imgs.length} 张凭证</button>`:'',actions=`<button class="ghost edit" data-id="${esc(r.id)}">编辑</button><button class="ghost danger del" data-id="${esc(r.id)}">删除</button>`;return `<tr class="record-row" data-day="${esc(r.date)}" hidden>
-    <td>${esc(r.date)}<div class="meta">${esc(timeOf(r))}</div></td><td class="${r.type}">${typeText}${isOpening?'<div class="tag">余额基准</div>':''}</td>
+function renderRecordRow(r){let imgs=parseImages(r.image_url),sg=suggest(r.summary),p=r.partner||sg.partner,c=r.category||sg.category,isIncome=r.type==='income',isOpening=marker(r.summary),typeText=isOpening?'结转核对':isIncome?'收入':'支出',amountText=!isOpening?money(r.amount):'—',balanceText=r._balance==null?'—':money(r._balance),tags=`${p?`<span class="tag">${esc(p)}</span>`:''}${c?`<span class="tag">${esc(c)}</span>`:''}`,attachment=imgs.length?`<button class="attachment" data-images="${esc(JSON.stringify(imgs))}">📎 ${imgs.length} 张凭证</button>`:'',actions=`<button class="ghost edit" data-id="${esc(r.id)}">编辑</button><button class="ghost danger del" data-id="${esc(r.id)}">删除</button>`;return `<tr class="record-row" data-day="${esc(r.date)}" hidden>
+    <td>${esc(r.date)}<div class="meta">${esc(timeOf(r))}</div></td><td class="${isOpening?'meta':r.type}">${typeText}</td>
     <td><div class="summary">${esc(r.summary)}</div>${r.remark?`<div class="meta">${esc(r.remark)}</div>`:''}${tags}${attachment}</td>
     <td class="num income">${isIncome&&!isOpening?amountText:'-'}</td><td class="num expense">${!isIncome?amountText:'-'}</td><td class="num">${balanceText}</td>
     <td>${actions}</td></tr>
     <tr class="record-card-row" data-day="${esc(r.date)}" hidden><td colspan="7"><article class="record-card">
-      <div class="record-card-top"><div class="record-card-when"><span class="record-card-time">${esc(timeOf(r))}</span><span class="record-card-type ${r.type}">${typeText}</span>${isOpening?'<span class="tag">余额基准</span>':''}</div><strong class="record-card-amount ${r.type}">${isOpening?'—':`${isIncome?'+':'-'}${amountText}`}</strong></div>
+      <div class="record-card-top"><div class="record-card-when"><span class="record-card-time">${esc(timeOf(r))}</span><span class="record-card-type ${isOpening?'meta':r.type}">${typeText}</span></div><strong class="record-card-amount ${isOpening?'meta':r.type}">${isOpening?'—':`${isIncome?'+':'-'}${amountText}`}</strong></div>
       <div class="record-card-summary">${esc(r.summary)}</div>${r.remark?`<div class="record-card-note">${esc(r.remark)}</div>`:''}
       ${tags?`<div class="record-card-tags">${tags}</div>`:''}
       <div class="record-card-balance"><span>本笔后余额</span><strong>${balanceText}</strong></div>
@@ -161,7 +162,7 @@ function renderRecordRow(r){let imgs=parseImages(r.image_url),sg=suggest(r.summa
 function render(){
   let expanded=new Set([...document.querySelectorAll('.day-toggle[aria-expanded="true"]')].map(el=>el.dataset.day));for(let r of S.records)delete r._balance;
   let opening=Number(S.summary?.opening_balance||0),running=opening;
-  let asc=[...S.records].sort((a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
+  let asc=[...S.records].reverse();
   if(S.summary&&S.summaryMonth===monthKey()&&S.summaryState==='fresh'&&S.recordState==='fresh'&&S.scope==='month'&&S.type==='all'&&!$('search').value.trim()&&S.page===0&&S.total<=S.pageSize)for(let r of asc){if(marker(r.summary))continue;running+=r.type==='income'?+r.amount:-r.amount;r._balance=running}
   let groups=new Map();for(let r of S.records){let day=r.date||'未填写日期';if(!groups.has(day))groups.set(day,[]);groups.get(day).push(r)}
   $('rows').innerHTML=[...groups].map(([day,rows])=>{let income=rows.reduce((sum,r)=>sum+(r.type==='income'&&!marker(r.summary)?+r.amount:0),0),expense=rows.reduce((sum,r)=>sum+(r.type==='expense'&&!marker(r.summary)?+r.amount:0),0);return `<tr class="day-group"><td colspan="7"><button type="button" class="day-toggle" data-day="${esc(day)}" aria-expanded="false"><span class="day-date"><span class="day-arrow" aria-hidden="true">›</span>${esc(day)}</span><span class="day-total">${rows.length} 笔 · 收入 ${money(income)} · 支出 ${money(expense)}</span><span class="day-toggle-hint">点击查看当天明细</span></button></td></tr>${rows.map(renderRecordRow).join('')}`}).join('');
@@ -195,7 +196,7 @@ async function remove(id){if(!S.user)return openOverlay('loginOverlay');if(!conf
 async function exportMonth(){
   if(!S.user)return openOverlay('loginOverlay');if(S.exporting)return;S.exporting=true;updateAuth();let b=bounds(),epoch=S.authEpoch,all=[],page=0;toast('正在准备完整月度数据…');
   try{let [XLSX,summaryResult]=await Promise.all([loadScript('./vendor/xlsx-0.18.5.js','XLSX'),db.rpc('cash_month_summary',{p_year:b.y,p_month:b.m})]);if(summaryResult.error)throw summaryResult.error;
-    while(true){if(epoch!==S.authEpoch)return;let {data,error}=await db.from('cash_records').select('date,time,type,amount,summary,remark,partner,category,created_at').gte('date',b.start).lt('date',b.end).order('date').order('created_at').range(page*1000,(page+1)*1000-1);if(error)throw error;all.push(...(data||[]));if(!data||data.length<1000)break;page++}
+    while(true){if(epoch!==S.authEpoch)return;let {data,error}=await db.from('cash_records').select('id,date,time,type,amount,summary,remark,partner,category,created_at').gte('date',b.start).lt('date',b.end).order('date').order('created_at').order('id').range(page*1000,(page+1)*1000-1);if(error)throw error;all.push(...(data||[]));if(!data||data.length<1000)break;page++}
     if(epoch!==S.authEpoch)return;let running=Number(summaryResult.data?.[0]?.opening_balance||0),rows=[];for(let r of all){if(marker(r.summary))continue;running+=r.type==='income'?+r.amount:-r.amount;rows.push({日期:r.date,时间:timeOf(r),类型:r.type==='income'?'收入':'支出',摘要:r.summary,往来单位:r.partner||'',分类:r.category||'',备注:r.remark||'',收入:r.type==='income'?r.amount:0,支出:r.type==='expense'?r.amount:0,余额:running})}if(!rows.length)return toast('本月没有可导出记录');let ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'出纳日记账');XLSX.writeFile(wb,`出纳日记账_${b.y}-${String(b.m).padStart(2,'0')}.xlsx`)
   }catch{toast('导出失败，请检查网络后重试')}finally{S.exporting=false;updateAuth()}
 }
