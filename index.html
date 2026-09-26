@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-09-27-sunset-theme-1">
+  <meta name="app-version" content="2026-09-27-cozy-layout-1">
   <link rel="icon" type="image/png" href="./assets/account-avatar-v1.png">
   <link rel="preconnect" href="https://vgmqdvvuekfzbagjpjid.supabase.co" crossorigin>
   <link rel="preload" href="./vendor/supabase-2.116.0.js" as="script">
@@ -24,15 +24,17 @@
     @media(max-height:520px){.overlay{padding:0;align-items:stretch;top:var(--vv-top,0px);bottom:auto;height:var(--vv-height,100dvh)}.modal{display:flex;flex-direction:column;width:100%;height:100%;max-height:none;border-radius:0;padding:0;overflow:hidden}.modal-head{flex:0 0 auto;background:#fff;padding:8px 16px}.grid{display:block;flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 16px 12px;-webkit-overflow-scrolling:touch}.field input,.field select,.field textarea{font-size:16px}.modal-actions{position:static;flex:0 0 auto;margin:0;background:#fff;border-top:1px solid var(--line);padding:7px 12px calc(7px + env(safe-area-inset-bottom));gap:7px}.modal-actions button{min-height:42px;flex:1}.quick-save{display:none}}
     .sync-status{margin:-10px 0 14px;color:var(--muted);font-size:12px;min-height:24px}.sync-status button{padding:3px 8px;margin-left:6px}.entry-status{padding:8px 16px;color:var(--brand-dark);background:var(--brand-soft);font-size:12px;flex:0 0 auto}.entry-status:empty{display:none}.entry-actions{padding:0 16px 8px;background:var(--brand-soft);flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap}.entry-actions[hidden]{display:none}.entry-actions button{font-size:12px;min-height:36px;padding:6px 10px}
     /* Decorative assets only. Keep the ledger and input panels readable. */
-    body{background:#e9efec;isolation:isolate}body:before{content:"";position:fixed;inset:0;height:100vh;height:100lvh;z-index:-1;pointer-events:none;background:linear-gradient(#f8faf94d,#f8faf96b),url("./assets/sunset-wallpaper-v1.webp") center center/cover no-repeat}
+    body{background:#f3f5f3}
     .top{padding:16px 18px;background:#ffffffed;border:1px solid #ffffffba;border-radius:20px;box-shadow:var(--shadow)}
     .title:before{content:none}.brand-avatar{display:block;flex:0 0 44px;width:44px;height:44px;object-fit:contain;border:3px solid #fff;border-radius:50%;background:#fff;box-shadow:0 3px 10px #24343620}.sub{margin-left:52px}
     .sync-status{width:fit-content;max-width:100%;padding:4px 10px;border-radius:8px;background:#ffffffed;color:#526263}.app>p{padding:8px 12px;border-radius:10px;background:#ffffffed}.card,.toolbar,.tablebox{background:#fffffff0}.pager{background:#ffffffd9}
     @media(max-width:760px){body:before{background-position:center,70% center}.top{padding:12px;border-radius:16px}.brand-avatar{flex-basis:38px;width:38px;height:38px}.sub{margin-left:46px}.tablebox{background:transparent}.record-card{background:#fffffff5}.empty{background:#fffffff0;border-radius:14px}}
     @media print{body{background:#fff}body:before{display:none}}
   </style>
+  <link rel="stylesheet" href="./assets/cozy-layout-v1.css">
 </head>
 <body>
+<div class="page-shell">
 <main class="app">
   <header class="top">
     <div><div class="title"><img class="brand-avatar" src="./assets/account-avatar-v1.png" alt="" width="44" height="44" decoding="async">出纳日记账 <span class="tag">V2</span></div><div class="sub">自动结转 · 全历史搜索 · 图片按需加载</div></div>
@@ -58,6 +60,8 @@
     <div class="pager"><span id="resultInfo"></span><div><button class="ghost" id="prev">上一页</button> <button class="ghost" id="next">下一页</button></div></div>
   </section>
 </main>
+<aside class="portrait-panel" aria-label="照片"><img src="./assets/cozy-photo-v1.webp" alt="阳光房间中的女性与猫" width="1429" height="753" loading="lazy" decoding="async"></aside>
+</div>
 <div class="overlay" id="recordOverlay"><div class="modal">
   <div class="modal-head"><h2 id="recordTitle">记一笔</h2><button class="ghost" data-close="recordOverlay">关闭</button></div>
   <div class="entry-status" id="entryStatus" role="status">可以先填写，正在核验登录…</div>
