@@ -79,7 +79,7 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 let db=null,clientPromise=null,authPromise=null;
 const S={records:[],rules:[],scope:'month',type:'all',page:0,pageSize:500,total:0,summary:null,user:null,editing:null,timer:null,recordsRequestId:0,summaryRequestId:0,authEpoch:0,imageUrls:[],imageIndex:0,saving:false,authPending:true,ledgerRequested:false,ledgerLoaded:false,recordState:'idle',summaryState:'idle',summaryMonth:'',exporting:false};
 const $=id=>document.getElementById(id), money=n=>'¥'+Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
-const scripts=new Map(),CACHE_PREFIX='cash-v2-view-1:',CACHE_TTL=15*60*1000;
+const scripts=new Map(),CACHE_PREFIX='cash-v2-view-2:',CACHE_TTL=15*60*1000;
 function loadScript(src,globalName){
   if(window[globalName])return Promise.resolve(window[globalName]);
   if(scripts.has(src))return scripts.get(src);
@@ -117,7 +117,7 @@ function resetPrivateView(discardDraft=false){
 }
 const MAX_IMAGES=6,MAX_SOURCE_BYTES=15*1024*1024,MAX_UPLOAD_BYTES=3*1024*1024,ALLOWED_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp']);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const marker=s=>['上月余额','上月结余','期初余额','上月余款'].includes(String(s||'').replace(/\s/g,''));
+const marker=s=>['上月余额','上月结余','期初余额','上月余款','当月余额'].includes(String(s||'').replace(/\s/g,''));
 function toast(t){document.querySelector('.status')?.remove();let d=document.createElement('div');d.className='status';d.textContent=t;document.body.append(d);setTimeout(()=>d.remove(),2400)}
 function bounds(){let y=+$('year').value,m=+$('month').value;return {y,m,start:`${y}-${String(m).padStart(2,'0')}-01`,end:m===12?`${y+1}-01-01`:`${y}-${String(m+1).padStart(2,'0')}-01`}}
 function parseImages(v){if(!v)return[];try{let x=JSON.parse(v);return Array.isArray(x)?x:[x]}catch{return String(v).split(',').map(x=>x.trim()).filter(Boolean)}}
@@ -147,12 +147,12 @@ async function loadRecords(){
   render();if(S.recordState==='error')$('empty').textContent='账目未加载成功，请点击重试';dataStatus();
 }
 function renderRecordRow(r){let imgs=parseImages(r.image_url),sg=suggest(r.summary),p=r.partner||sg.partner,c=r.category||sg.category,isIncome=r.type==='income',isOpening=marker(r.summary),typeText=isIncome?'收入':'支出',amountText=!isOpening?money(r.amount):'—',balanceText=r._balance==null?'—':money(r._balance),tags=`${p?`<span class="tag">${esc(p)}</span>`:''}${c?`<span class="tag">${esc(c)}</span>`:''}`,attachment=imgs.length?`<button class="attachment" data-images="${esc(JSON.stringify(imgs))}">📎 ${imgs.length} 张凭证</button>`:'',actions=`<button class="ghost edit" data-id="${esc(r.id)}">编辑</button><button class="ghost danger del" data-id="${esc(r.id)}">删除</button>`;return `<tr class="record-row" data-day="${esc(r.date)}" hidden>
-    <td>${esc(r.date)}<div class="meta">${esc(timeOf(r))}</div></td><td class="${r.type}">${typeText}${isOpening?'<div class="tag">期初基准</div>':''}</td>
+    <td>${esc(r.date)}<div class="meta">${esc(timeOf(r))}</div></td><td class="${r.type}">${typeText}${isOpening?'<div class="tag">余额基准</div>':''}</td>
     <td><div class="summary">${esc(r.summary)}</div>${r.remark?`<div class="meta">${esc(r.remark)}</div>`:''}${tags}${attachment}</td>
     <td class="num income">${isIncome&&!isOpening?amountText:'-'}</td><td class="num expense">${!isIncome?amountText:'-'}</td><td class="num">${balanceText}</td>
     <td>${actions}</td></tr>
     <tr class="record-card-row" data-day="${esc(r.date)}" hidden><td colspan="7"><article class="record-card">
-      <div class="record-card-top"><div class="record-card-when"><span class="record-card-time">${esc(timeOf(r))}</span><span class="record-card-type ${r.type}">${typeText}</span>${isOpening?'<span class="tag">期初基准</span>':''}</div><strong class="record-card-amount ${r.type}">${isOpening?'—':`${isIncome?'+':'-'}${amountText}`}</strong></div>
+      <div class="record-card-top"><div class="record-card-when"><span class="record-card-time">${esc(timeOf(r))}</span><span class="record-card-type ${r.type}">${typeText}</span>${isOpening?'<span class="tag">余额基准</span>':''}</div><strong class="record-card-amount ${r.type}">${isOpening?'—':`${isIncome?'+':'-'}${amountText}`}</strong></div>
       <div class="record-card-summary">${esc(r.summary)}</div>${r.remark?`<div class="record-card-note">${esc(r.remark)}</div>`:''}
       ${tags?`<div class="record-card-tags">${tags}</div>`:''}
       <div class="record-card-balance"><span>本笔后余额</span><strong>${balanceText}</strong></div>
@@ -164,7 +164,7 @@ function render(){
   let asc=[...S.records].sort((a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
   if(S.summary&&S.summaryMonth===monthKey()&&S.summaryState==='fresh'&&S.recordState==='fresh'&&S.scope==='month'&&S.type==='all'&&!$('search').value.trim()&&S.page===0&&S.total<=S.pageSize)for(let r of asc){if(marker(r.summary))continue;running+=r.type==='income'?+r.amount:-r.amount;r._balance=running}
   let groups=new Map();for(let r of S.records){let day=r.date||'未填写日期';if(!groups.has(day))groups.set(day,[]);groups.get(day).push(r)}
-  $('rows').innerHTML=[...groups].map(([day,rows])=>{let income=rows.reduce((sum,r)=>sum+(r.type==='income'&&!marker(r.summary)?+r.amount:0),0),expense=rows.reduce((sum,r)=>sum+(r.type==='expense'?+r.amount:0),0);return `<tr class="day-group"><td colspan="7"><button type="button" class="day-toggle" data-day="${esc(day)}" aria-expanded="false"><span class="day-date"><span class="day-arrow" aria-hidden="true">›</span>${esc(day)}</span><span class="day-total">${rows.length} 笔 · 收入 ${money(income)} · 支出 ${money(expense)}</span><span class="day-toggle-hint">点击查看当天明细</span></button></td></tr>${rows.map(renderRecordRow).join('')}`}).join('');
+  $('rows').innerHTML=[...groups].map(([day,rows])=>{let income=rows.reduce((sum,r)=>sum+(r.type==='income'&&!marker(r.summary)?+r.amount:0),0),expense=rows.reduce((sum,r)=>sum+(r.type==='expense'&&!marker(r.summary)?+r.amount:0),0);return `<tr class="day-group"><td colspan="7"><button type="button" class="day-toggle" data-day="${esc(day)}" aria-expanded="false"><span class="day-date"><span class="day-arrow" aria-hidden="true">›</span>${esc(day)}</span><span class="day-total">${rows.length} 笔 · 收入 ${money(income)} · 支出 ${money(expense)}</span><span class="day-toggle-hint">点击查看当天明细</span></button></td></tr>${rows.map(renderRecordRow).join('')}`}).join('');
   $('empty').style.display=S.records.length?'none':'block';$('empty').textContent='没有找到记录';$('resultInfo').textContent=`共 ${S.total} 条 · 第 ${S.page+1} 页`;$('prev').disabled=S.page===0;$('next').disabled=(S.page+1)*S.pageSize>=S.total
   for(let el of document.querySelectorAll('.day-toggle'))if(expanded.has(el.dataset.day)){el.setAttribute('aria-expanded','true');el.querySelector('.day-toggle-hint').textContent='收起当天明细';for(let row of document.querySelectorAll('.record-row,.record-card-row'))if(row.dataset.day===el.dataset.day)row.hidden=false}
 }
