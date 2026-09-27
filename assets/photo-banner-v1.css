@@ -1,0 +1,15 @@
+/* One column on every screen: header, landscape photo, then ledger. */
+.page-shell{display:flex;flex-direction:column;max-width:1240px;padding:24px;gap:16px;align-items:stretch}
+.app{display:contents}
+.top{order:0;width:100%;margin:0}
+.portrait-panel{order:1;position:relative;top:auto;width:100%;height:clamp(220px,26vw,330px);min-height:0;max-height:none;flex:none;border-radius:20px;background:#e8e2d9;box-shadow:none}
+.portrait-panel img{display:block;width:100%;height:100%;max-height:none;max-width:none;object-fit:cover;object-position:50% var(--banner-y,30%)}
+.portrait-panel img:not([src]){display:none}
+.sync-status{order:2;margin:0;max-width:100%}
+.stats{order:3;width:100%;margin:0}
+.toolbar{order:4;width:100%;margin:0}
+.app>p{order:5;margin:0}
+.tablebox{order:6;width:100%;min-width:0}
+@media(min-width:761px){.stats{grid-template-columns:repeat(4,minmax(0,1fr))}.toolbar input{order:0;flex:1;min-width:200px}}
+@media(max-width:760px){.page-shell{padding:12px;gap:12px}.portrait-panel{height:auto;aspect-ratio:16/9;border-radius:18px}.portrait-panel img{object-position:50% 50%}.portrait-panel>img{position:absolute;inset:0}}
+@media print{.page-shell{display:block;padding:0}.app{display:block}.portrait-panel{display:none}}
