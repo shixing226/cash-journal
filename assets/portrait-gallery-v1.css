@@ -1,0 +1,7 @@
+/* Each picture has its own focal point. Collages remain complete. */
+.portrait-panel img{object-position:var(--portrait-x,31%) center}
+.portrait-panel img:not([src]){display:none}
+.portrait-panel.portrait-whole img{object-fit:contain;background:#e9e5de}
+.portrait-caption{position:absolute;right:12px;bottom:12px;max-width:calc(100% - 24px);border-radius:20px;background:#142d32b8;color:#fff;padding:6px 10px;font-size:11px;line-height:1.4;pointer-events:none}
+.portrait-caption[hidden]{display:none}
+@media(max-width:1100px){.portrait-panel img{object-position:var(--portrait-x,38%) var(--portrait-mobile-y,30%)}}
