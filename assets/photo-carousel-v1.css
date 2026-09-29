@@ -1,0 +1,5 @@
+/* Appearance only: clean banner with no visible controls or captions. */
+.brand-avatar{border:0!important;box-shadow:none!important}
+.portrait-panel{touch-action:pan-y pinch-zoom}
+.portrait-panel .carousel-image{position:absolute;inset:0;user-select:none;-webkit-user-drag:none}
+.portrait-panel:focus-visible{outline:2px solid #73aeb0;outline-offset:3px}

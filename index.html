@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-09-27-banner-2">
-  <link rel="icon" type="image/png" href="./assets/account-avatar-v1.png">
+  <meta name="app-version" content="2026-09-29-carousel-1">
+  <link rel="icon" type="image/png" href="./assets/account-avatar-v2.png">
   <link rel="preconnect" href="https://vgmqdvvuekfzbagjpjid.supabase.co" crossorigin>
   <link rel="preload" href="./vendor/supabase-2.116.0.js" as="script">
   <style>
@@ -33,13 +33,14 @@
   </style>
   <link rel="stylesheet" href="./assets/cozy-layout-v1.css">
   <link rel="stylesheet" href="./assets/photo-banner-v1.css">
-  <script defer src="./assets/portrait-gallery-v4.js"></script>
+  <link rel="stylesheet" href="./assets/photo-carousel-v1.css">
+  <script defer src="./assets/portrait-gallery-v5.js"></script>
 </head>
 <body>
 <div class="page-shell">
 <main class="app">
   <header class="top">
-    <div><div class="title"><img class="brand-avatar" src="./assets/account-avatar-v1.png" alt="" width="44" height="44" decoding="async">出纳日记账 <span class="tag">V2</span></div><div class="sub">自动结转 · 全历史搜索 · 图片按需加载</div></div>
+    <div><div class="title"><img class="brand-avatar" src="./assets/account-avatar-v2.png" alt="" width="44" height="44" decoding="async">出纳日记账 <span class="tag">V2</span></div><div class="sub">自动结转 · 全历史搜索 · 图片按需加载</div></div>
     <div class="actions"><button class="ghost" id="loginBtn">登录</button><button class="ghost" id="exportBtn">导出本月</button><button class="primary" id="addBtn">＋ 记一笔</button></div>
   </header>
   <div class="sync-status" role="status"><span id="dataStatus">正在核验登录…</span><button class="ghost" id="retryBtn" hidden>重试</button></div>
