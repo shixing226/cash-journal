@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-10-11-list-1">
+  <meta name="app-version" content="2026-10-11-date-3">
   <link rel="icon" type="image/png" href="./assets/account-avatar-v2.png">
   <link rel="preconnect" href="https://vgmqdvvuekfzbagjpjid.supabase.co" crossorigin>
   <link rel="preload" href="./vendor/supabase-2.116.0.js" as="script">
@@ -251,20 +251,20 @@ function closeOverlay(id,loadLedger=true,force=false){if(id==='recordOverlay'){i
 function syncVisualViewport(){let vv=window.visualViewport,h=vv?.height||window.innerHeight,top=vv?.offsetTop||0;document.documentElement.style.setProperty('--vv-height',`${Math.round(h)}px`);document.documentElement.style.setProperty('--vv-top',`${Math.round(top)}px`)}
 function keepFocusedFieldVisible(){let el=document.activeElement;if(!el?.closest('.modal'))return;setTimeout(()=>el.scrollIntoView({block:'center',behavior:'smooth'}),80)}
 function localDate(now=new Date()){return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`}
-// Restored form values and input/change events are not proof of an intentional backfill.
-// Explicit non-today consent lasts for this day's batch only. Submitted intents stay immutable.
-const entryDateState={manual:false,openedOn:null,confirmedDate:null,confirmedOn:null,continuingBatch:false,needsConfirm:false,timer:null};
+// Picking a date is sufficient intent; restored values without user interaction are not.
+// Reopening starts today. Only an unattended old draft needs the date reminder.
+const entryDateState={manual:false,openedOn:null,confirmedDate:null,confirmedOn:null,continuingBatch:false,dateInteraction:false,needsConfirm:false,timer:null};
 function hideEntryDateNotice(){entryDateState.needsConfirm=false;$('entryDateNotice').hidden=true}
 function isEntryDateConfirmed(date){return entryDateState.confirmedDate===date&&entryDateState.confirmedOn===localDate()}
-function resetEntryDate(manual=false,keepConfirmation=false){entryDateState.manual=manual;entryDateState.openedOn=localDate();entryDateState.continuingBatch=false;if(!keepConfirmation){entryDateState.confirmedDate=null;entryDateState.confirmedOn=null}hideEntryDateNotice()}
+function resetEntryDate(manual=false,keepConfirmation=false){entryDateState.manual=manual;entryDateState.openedOn=localDate();entryDateState.continuingBatch=false;entryDateState.dateInteraction=false;if(!keepConfirmation){entryDateState.confirmedDate=null;entryDateState.confirmedOn=null}hideEntryDateNotice()}
 function showEntryDateNotice(){entryDateState.needsConfirm=true;$('entryDateMessage').textContent=`今天是 ${localDate()}，本笔日期是 ${$('rDate').value}，保存前请确认。`;$('entryDateNotice').hidden=false}
 function hasEntryContent(){return ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark'].some(id=>$(id).value.trim())||$('rImages').files.length>0}
 function syncEntryDate(){
   if(!$('recordOverlay').classList.contains('show')||S.editing||S.pendingSave||S.saving)return;
   const date=$('rDate').value,today=localDate();
   if(!date||date===today||isEntryDateConfirmed(date)){hideEntryDateNotice();return}
-  const expiredBatch=entryDateState.continuingBatch&&entryDateState.openedOn!==today;
-  if(!hasEntryContent()&&(!entryDateState.manual||expiredBatch)){$('rDate').value=today;resetEntryDate();return}
+  const staleEntry=entryDateState.openedOn!==today;
+  if(!hasEntryContent()&&(!entryDateState.manual||staleEntry)){$('rDate').value=today;resetEntryDate();return}
   showEntryDateNotice();
 }
 function scheduleEntryDateCheck(){
@@ -274,9 +274,9 @@ function scheduleEntryDateCheck(){
 }
 function resumeEntryDate(){syncEntryDate();scheduleEntryDateCheck()}
 function prepareNextEntryDate(wasEditing){
-  const manual=entryDateState.manual||!!wasEditing;
-  if(!manual||(!wasEditing&&entryDateState.openedOn!==localDate())){$('rDate').value=localDate();resetEntryDate()}
-  else resetEntryDate(true,!wasEditing&&isEntryDateConfirmed($('rDate').value));
+  const keepBatch=!wasEditing&&entryDateState.manual&&isEntryDateConfirmed($('rDate').value);
+  if(keepBatch)resetEntryDate(true,true);
+  else{$('rDate').value=localDate();resetEntryDate()}
   entryDateState.continuingBatch=true;
 }
 function openRecord(r=null){if(S.saving)return;cancelPendingSave();S.entryVersion++;S.draftDirty=false;S.draftWriteId=null;S.draftOwnerId=S.user?.id||S.sessionOwnerId||null;S.editing=r;$('rPartner').dataset.manual='';$('rCategory').dataset.manual='';$('recordTitle').textContent=r?'编辑记录':'记一笔';$('rDate').value=r?.date||localDate();resetEntryDate(!!r);$('rIncome').value=r?.type==='income'?r.amount:'';$('rExpense').value=r?.type==='expense'?r.amount:'';$('rSummary').value=r?.summary||'';$('rPartner').value=r?.partner||'';$('rCategory').value=r?.category||'';$('rRemark').value=r?.remark||'';$('rImages').value='';setImageStatus('');openOverlay('recordOverlay');updateAuth();scheduleEntryDateCheck();if(matchMedia('(min-width:761px)').matches)setTimeout(()=>{$('rIncome').focus()},80)}
@@ -388,8 +388,13 @@ $('addBtn').onclick=()=>openRecord();$('saveBtn').onclick=()=>save(true);$('save
 $('entryRetryBtn').onclick=()=>void checkAuth();$('entryLoginBtn').onclick=showLogin;$('cancelPendingBtn').onclick=()=>{cancelPendingSave();scheduleLedgerPreload()};
 document.querySelector('#recordOverlay .grid').addEventListener('input',()=>{S.draftDirty=true;syncEntryDate()});
 // Check before the first keystroke too: mobile browsers may omit resume events.
-for(const event of ['pointerdown','focusin','beforeinput'])$('recordOverlay').addEventListener(event,e=>{if(e.target!==$('rDate'))syncEntryDate()},{capture:true});
-for(const event of ['input','change'])$('rDate').addEventListener(event,()=>{resetEntryDate($('rDate').value!==localDate());syncEntryDate()});
+for(const event of ['pointerdown','focusin','beforeinput'])$('recordOverlay').addEventListener(event,e=>{if(e.target!==$('rDate')){entryDateState.dateInteraction=false;syncEntryDate()}},{capture:true});
+for(const event of ['pointerdown','keydown'])$('rDate').addEventListener(event,e=>{if(e.isTrusted)entryDateState.dateInteraction=true});
+for(const event of ['input','change'])$('rDate').addEventListener(event,e=>{
+  if(S.pendingSave||S.saving)return;
+  if(e.isTrusted&&entryDateState.dateInteraction){let date=$('rDate').value;resetEntryDate(date!==localDate());entryDateState.dateInteraction=true;entryDateState.confirmedDate=date;entryDateState.confirmedOn=localDate()}
+  syncEntryDate();
+});
 $('entryDateToday').onclick=()=>{if(S.pendingSave||S.saving)return;$('rDate').value=localDate();resetEntryDate();S.draftDirty=true};
 $('entryDateKeep').onclick=()=>{if(S.pendingSave||S.saving||!$('rDate').value)return;entryDateState.manual=true;entryDateState.openedOn=localDate();entryDateState.confirmedDate=$('rDate').value;entryDateState.confirmedOn=localDate();hideEntryDateNotice()};
 $('rImages').addEventListener('change',()=>{S.draftDirty=true});
