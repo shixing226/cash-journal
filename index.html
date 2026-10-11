@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-09-30-date-1">
+  <meta name="app-version" content="2026-10-11-date-2">
   <link rel="icon" type="image/png" href="./assets/account-avatar-v2.png">
   <link rel="preconnect" href="https://vgmqdvvuekfzbagjpjid.supabase.co" crossorigin>
   <link rel="preload" href="./vendor/supabase-2.116.0.js" as="script">
@@ -71,7 +71,7 @@
   <div class="entry-status" id="entryStatus" role="status">可以先填写，正在核验登录…</div>
   <div class="entry-actions" id="entryActions" hidden><button class="ghost" id="entryRetryBtn" hidden>重试登录核验</button><button class="ghost" id="entryLoginBtn" hidden>重新登录</button><button class="ghost" id="cancelPendingBtn" hidden>取消等待，继续修改</button></div>
   <div class="grid">
-    <div class="field"><label for="rDate">日期</label><input type="date" id="rDate"><div class="entry-date-notice" id="entryDateNotice" role="status" hidden><p id="entryDateMessage"></p><div class="entry-date-choices"><button type="button" class="ghost" id="entryDateToday">改为今天</button><button type="button" class="ghost" id="entryDateKeep">保留原日期</button></div></div></div>
+    <div class="field"><label for="rDate">日期</label><input type="date" id="rDate" autocomplete="off"><div class="entry-date-notice" id="entryDateNotice" role="status" hidden><p id="entryDateMessage"></p><div class="entry-date-choices"><button type="button" class="ghost" id="entryDateToday">改为今天</button><button type="button" class="ghost" id="entryDateKeep">按此日期记录</button></div></div></div>
     <label class="field"><span>收入金额</span><input type="number" inputmode="decimal" min="0" step=".01" id="rIncome" placeholder="0.00"></label>
     <label class="field"><span>支出金额</span><input type="number" inputmode="decimal" min="0" step=".01" id="rExpense" placeholder="0.00"></label>
     <label class="field"><span>摘要</span><input id="rSummary" placeholder="照平时习惯填写"></label>
@@ -221,18 +221,21 @@ function closeOverlay(id,loadLedger=true,force=false){if(id==='recordOverlay'){i
 function syncVisualViewport(){let vv=window.visualViewport,h=vv?.height||window.innerHeight,top=vv?.offsetTop||0;document.documentElement.style.setProperty('--vv-height',`${Math.round(h)}px`);document.documentElement.style.setProperty('--vv-top',`${Math.round(top)}px`)}
 function keepFocusedFieldVisible(){let el=document.activeElement;if(!el?.closest('.modal'))return;setTimeout(()=>el.scrollIntoView({block:'center',behavior:'smooth'}),80)}
 function localDate(now=new Date()){return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`}
-// Only untouched, automatically chosen dates follow the local day. Never rewrite a submitted intent.
-const entryDateState={automaticDate:null,manual:false,needsConfirm:false,timer:null};
+// Restored form values and input/change events are not proof of an intentional backfill.
+// Explicit non-today consent lasts for this day's batch only. Submitted intents stay immutable.
+const entryDateState={manual:false,openedOn:null,confirmedDate:null,confirmedOn:null,continuingBatch:false,needsConfirm:false,timer:null};
 function hideEntryDateNotice(){entryDateState.needsConfirm=false;$('entryDateNotice').hidden=true}
-function resetEntryDate(manual=false){entryDateState.automaticDate=$('rDate').value;entryDateState.manual=manual;hideEntryDateNotice()}
+function isEntryDateConfirmed(date){return entryDateState.confirmedDate===date&&entryDateState.confirmedOn===localDate()}
+function resetEntryDate(manual=false,keepConfirmation=false){entryDateState.manual=manual;entryDateState.openedOn=localDate();entryDateState.continuingBatch=false;if(!keepConfirmation){entryDateState.confirmedDate=null;entryDateState.confirmedOn=null}hideEntryDateNotice()}
+function showEntryDateNotice(){entryDateState.needsConfirm=true;$('entryDateMessage').textContent=`今天是 ${localDate()}，本笔日期是 ${$('rDate').value}，保存前请确认。`;$('entryDateNotice').hidden=false}
 function hasEntryContent(){return ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark'].some(id=>$(id).value.trim())||$('rImages').files.length>0}
 function syncEntryDate(){
-  if(!$('recordOverlay').classList.contains('show')||S.editing||S.pendingSave||S.saving||entryDateState.manual)return;
+  if(!$('recordOverlay').classList.contains('show')||S.editing||S.pendingSave||S.saving)return;
   const date=$('rDate').value,today=localDate();
-  if(date!==entryDateState.automaticDate)return;
-  if(date===today){hideEntryDateNotice();return}
-  if(!hasEntryContent()){$('rDate').value=today;resetEntryDate();return}
-  entryDateState.needsConfirm=true;$('entryDateMessage').textContent=`今天是 ${today}，这笔草稿的日期仍是 ${date}，请确认。`;$('entryDateNotice').hidden=false;
+  if(!date||date===today||isEntryDateConfirmed(date)){hideEntryDateNotice();return}
+  const expiredBatch=entryDateState.continuingBatch&&entryDateState.openedOn!==today;
+  if(!hasEntryContent()&&(!entryDateState.manual||expiredBatch)){$('rDate').value=today;resetEntryDate();return}
+  showEntryDateNotice();
 }
 function scheduleEntryDateCheck(){
   clearTimeout(entryDateState.timer);entryDateState.timer=null;if(document.hidden)return;
@@ -241,7 +244,10 @@ function scheduleEntryDateCheck(){
 }
 function resumeEntryDate(){syncEntryDate();scheduleEntryDateCheck()}
 function prepareNextEntryDate(wasEditing){
-  const manual=entryDateState.manual||!!wasEditing;if(!manual)$('rDate').value=localDate();resetEntryDate(manual);
+  const manual=entryDateState.manual||!!wasEditing;
+  if(!manual||(!wasEditing&&entryDateState.openedOn!==localDate())){$('rDate').value=localDate();resetEntryDate()}
+  else resetEntryDate(true,!wasEditing&&isEntryDateConfirmed($('rDate').value));
+  entryDateState.continuingBatch=true;
 }
 function openRecord(r=null){if(S.saving)return;cancelPendingSave();S.entryVersion++;S.draftDirty=false;S.draftWriteId=null;S.draftOwnerId=S.user?.id||S.sessionOwnerId||null;S.editing=r;$('rPartner').dataset.manual='';$('rCategory').dataset.manual='';$('recordTitle').textContent=r?'编辑记录':'记一笔';$('rDate').value=r?.date||localDate();resetEntryDate(!!r);$('rIncome').value=r?.type==='income'?r.amount:'';$('rExpense').value=r?.type==='expense'?r.amount:'';$('rSummary').value=r?.summary||'';$('rPartner').value=r?.partner||'';$('rCategory').value=r?.category||'';$('rRemark').value=r?.remark||'';$('rImages').value='';setImageStatus('');openOverlay('recordOverlay');updateAuth();scheduleEntryDateCheck();if(matchMedia('(min-width:761px)').matches)setTimeout(()=>{$('rIncome').focus()},80)}
 function autoOpenNewRecordOnPhone(){if(matchMedia('(max-width:760px)').matches&&!S.ledgerRequested&&!document.querySelector('.overlay.show'))openRecord()}
@@ -253,8 +259,10 @@ async function uploadFiles(assertCurrent=()=>{},sourceFiles){let files=await pre
 function cancelPendingSave(){if(!S.pendingSave)return;S.pendingSave=null;updateAuth()}
 function showLogin(){if(S.saving)return;cancelPendingSave();openOverlay('loginOverlay')}
 function captureEntry(closeAfterSave){
-  syncEntryDate();if(entryDateState.needsConfirm)throw new Error('已经跨天，请先确认这笔草稿的日期');
+  syncEntryDate();
   let date=$('rDate').value,income=+$('rIncome').value||0,expense=+$('rExpense').value||0,summary=$('rSummary').value.trim();
+  // Final gate checks the actual outgoing date, even if all resume/input events were missed.
+  if(!S.editing&&date&&date!==localDate()&&!isEntryDateConfirmed(date)){showEntryDateNotice();$('entryDateNotice').scrollIntoView({block:'center'});throw new Error('本笔日期不是今天，请先确认日期再保存');}
   if(!date||!summary)throw new Error('请填写日期和摘要');
   if(!Number.isFinite(income)||!Number.isFinite(expense)||income<0||expense<0)throw new Error('请填写有效的收入或支出金额');
   if(income<=0&&expense<=0)throw new Error('请填写收入或支出金额');
@@ -348,10 +356,12 @@ $('rSummary').addEventListener('input',()=>{let s=suggest($('rSummary').value);i
 $('rImages').addEventListener('change',()=>{let files=[...$('rImages').files];if(!files.length)return setImageStatus('');if(files.length>MAX_IMAGES)return setImageStatus(`已选择 ${files.length} 张，一次最多 ${MAX_IMAGES} 张，请重新选择。`,'error');let bad=files.find(f=>!ALLOWED_IMAGE_TYPES.has(f.type)||f.size>MAX_SOURCE_BYTES);if(bad)return setImageStatus(`“${bad.name}”格式不支持或超过 15MB，请重新选择。`,'error');setImageStatus(`已选择 ${files.length} 张，保存时会自动压缩上传。`)});
 $('addBtn').onclick=()=>openRecord();$('saveBtn').onclick=()=>save(true);$('saveNextBtn').onclick=()=>save(false);$('loginBtn').onclick=async()=>{if(S.user){if(S.saving)return toast('正在保存，请完成后再退出');if(confirm('要退出当前账号吗？')){S.identityVersion++;resetPrivateView(true);S.sessionOwnerId=null;S.authPending=false;S.authState='signedout';updateAuth();try{let {error}=await db.auth.signOut();if(error)toast('本页已清空，账号退出未完成，请重试')}catch{toast('本页已清空，账号退出未完成')}}}else showLogin()};$('doLoginBtn').onclick=auth;$('forgotBtn').onclick=sendReset;$('savePasswordBtn').onclick=savePassword;$('exportBtn').onclick=exportMonth;$('retryBtn').onclick=()=>S.user?refresh():checkAuth();
 $('entryRetryBtn').onclick=()=>void checkAuth();$('entryLoginBtn').onclick=showLogin;$('cancelPendingBtn').onclick=()=>{cancelPendingSave();scheduleLedgerPreload()};
-document.querySelector('#recordOverlay .grid').addEventListener('input',()=>{S.draftDirty=true});
-for(const event of ['input','change'])$('rDate').addEventListener(event,()=>{entryDateState.manual=true;hideEntryDateNotice()});
+document.querySelector('#recordOverlay .grid').addEventListener('input',()=>{S.draftDirty=true;syncEntryDate()});
+// Check before the first keystroke too: mobile browsers may omit resume events.
+for(const event of ['pointerdown','focusin','beforeinput'])$('recordOverlay').addEventListener(event,e=>{if(e.target!==$('rDate'))syncEntryDate()},{capture:true});
+for(const event of ['input','change'])$('rDate').addEventListener(event,()=>{resetEntryDate($('rDate').value!==localDate());syncEntryDate()});
 $('entryDateToday').onclick=()=>{if(S.pendingSave||S.saving)return;$('rDate').value=localDate();resetEntryDate();S.draftDirty=true};
-$('entryDateKeep').onclick=()=>{if(S.pendingSave||S.saving)return;entryDateState.manual=true;hideEntryDateNotice()};
+$('entryDateKeep').onclick=()=>{if(S.pendingSave||S.saving||!$('rDate').value)return;entryDateState.manual=true;entryDateState.openedOn=localDate();entryDateState.confirmedDate=$('rDate').value;entryDateState.confirmedOn=localDate();hideEntryDateNotice()};
 $('rImages').addEventListener('change',()=>{S.draftDirty=true});
 window.addEventListener('beforeunload',e=>{if(S.pendingSave||S.saving||S.draftDirty){e.preventDefault();e.returnValue=''}});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.shiftKey||e.isComposing||e.keyCode===229||e.target.tagName==='TEXTAREA'||e.target.type==='file'||!e.target.closest('#recordOverlay')||!matchMedia('(hover:hover) and (pointer:fine)').matches||!$('recordOverlay').classList.contains('show'))return;if(['INPUT','SELECT'].includes(e.target.tagName)){e.preventDefault();save(false)}});
