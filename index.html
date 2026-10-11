@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-10-11-date-2">
+  <meta name="app-version" content="2026-10-11-list-1">
   <link rel="icon" type="image/png" href="./assets/account-avatar-v2.png">
   <link rel="preconnect" href="https://vgmqdvvuekfzbagjpjid.supabase.co" crossorigin>
   <link rel="preload" href="./vendor/supabase-2.116.0.js" as="script">
@@ -99,6 +99,7 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 let db=null,clientPromise=null,authPromise=null,authUserRequest=null;
 const S={records:[],rules:[],scope:'month',type:'all',page:0,pageSize:500,total:0,summary:null,user:null,editing:null,timer:null,recordsRequestId:0,summaryRequestId:0,authEpoch:0,imageUrls:[],imageIndex:0,saving:false,authPending:true,ledgerRequested:false,ledgerLoaded:false,recordState:'idle',summaryState:'idle',summaryMonth:'',exporting:false};
 Object.assign(S,{authState:'checking',authCheckId:0,identityVersion:0,sessionOwnerId:null,draftOwnerId:null,manualLogin:false,pendingSave:null,entryVersion:0,draftDirty:false,draftWriteId:null,ledgerDirty:false,backgroundTimer:null});
+Object.assign(S,{recordsViewKey:'',pendingRecords:false,pendingSummary:false,lastLedgerCheck:0});
 const $=id=>document.getElementById(id), money=n=>'¥'+Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const scripts=new Map(),CACHE_PREFIX='cash-v2-view-3:',CACHE_TTL=15*60*1000;
 function loadScript(src,globalName){
@@ -146,14 +147,15 @@ function monthKey(){let b=bounds();return `${b.y}-${b.m}`}
 function recordsKey(){return JSON.stringify([monthKey(),S.scope,S.type,S.page,S.pageSize,$('search').value.trim()])}
 function dataStatus(){
   if(!S.user)return;
-  let states=[S.recordState,S.summaryState],failed=states.includes('error'),cached=states.some(x=>x.startsWith('cached')),pending=states.some(x=>x==='loading'||x==='cached');
-  $('dataStatus').textContent=!S.ledgerRequested?'正在后台准备账本…':cached?(pending?'显示本次浏览的缓存，正在更新…':'网络更新失败，当前是旧缓存，请重试'):failed?'部分数据加载失败，请重试':pending?'正在加载最新账目…':'已更新为最新账目';
+  let states=[S.recordState,S.summaryState],failed=states.includes('error'),cached=states.some(x=>x.startsWith('cached')),pending=S.pendingRecords||S.pendingSummary||states.some(x=>x==='idle'||x==='loading'||x==='cached')||S.recordsViewKey!==recordsKey()||S.summaryMonth!==monthKey();
+  $('dataStatus').textContent=S.authPending?'正在核验登录，完成后自动更新账目…':pending?(cached?'显示已有账目，正在更新…':'正在加载最新账目…'):cached?'网络更新失败，当前是旧缓存，请重试':failed?'部分数据加载失败，请重试':'已更新为最新账目';
   $('retryBtn').hidden=!(failed||states.includes('cached-error'));
 }
 function renderSummary(){for(let [id,key]of [['opening','opening_balance'],['income','total_income'],['expense','total_expense'],['closing','closing_balance']])$(id).textContent=S.summary?money(S.summary[key]):'—'}
 function resetPrivateView(discardDraft=false){
   // An expired session must not erase a new draft. Existing-record edits are private.
   discardDraft=discardDraft||!!S.editing;cancelPendingSave();S.authCheckId++;authPromise=null;clearTimeout(S.backgroundTimer);S.summaryAbort?.abort();S.ledgerDirty=false;
+  S.pendingRecords=S.pendingSummary=false;S.recordsViewKey='';S.summaryMonth='';S.lastLedgerCheck=0;
   S.authEpoch++;S.recordsRequestId++;S.summaryRequestId++;S.recordsAbort?.abort();clearTimeout(S.timer);clearViewCache();S.user=null;S.records=[];S.rules=[];S.summary=null;S.total=0;S.ledgerLoaded=false;S.recordState=S.summaryState='idle';S.imageUrls=[];$('imageList').replaceChildren();closeOverlay('imageOverlay',false);$('rows').replaceChildren();$('resultInfo').textContent='';$('empty').style.display='block';$('empty').textContent='请登录查看账本';renderSummary();$('dataStatus').textContent='请登录查看账本';$('retryBtn').hidden=true;
   if(discardDraft){S.editing=null;S.entryVersion++;S.draftDirty=false;S.draftWriteId=null;S.draftOwnerId=null;for(let id of ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark','rImages','password'])$(id).value='';closeOverlay('recordOverlay',false,true)}
 }
@@ -178,9 +180,9 @@ async function loadSummary(){
   catch{if(requestId!==S.summaryRequestId||epoch!==S.authEpoch||key!==monthKey())return;S.summaryState=cached?'cached-error':'error'}
   renderSummary();if(S.records.length)render();dataStatus();
 }
-async function loadRecords(){
+async function fetchRecords(){
   if(!S.user)return;let requestId=++S.recordsRequestId,epoch=S.authEpoch,key=recordsKey(),cached=readCache('records',key);S.recordsAbort?.abort();S.recordsAbort=new AbortController();
-  S.records=cached?.records||[];S.total=cached?.total||0;S.recordState=cached?'cached':'loading';render();if(!cached)$('empty').textContent='正在加载…';dataStatus();
+  S.recordsViewKey=key;S.records=cached?.records||[];S.total=cached?.total||0;S.recordState=cached?'cached':'loading';render();if(!cached)$('empty').textContent='正在加载…';dataStatus();
   let q=db.from('cash_records').select('id,date,time,type,amount,summary,remark,image_url,partner,category,created_at',{count:'exact'});
   let term=$('search').value.trim(),b=bounds();if(S.scope==='month')q=q.gte('date',b.start).lt('date',b.end);
   if(S.type!=='all')q=q.eq('type',S.type);
@@ -204,6 +206,8 @@ function renderRecordRow(r){let imgs=parseImages(r.image_url),sg=suggest(r.summa
 function render(){
   // Prefetch while typing, but don't build hundreds of hidden table/card nodes.
   if($('recordOverlay').classList.contains('show')){S.ledgerDirty=true;return}S.ledgerDirty=false;
+  // A restored filter value must never label a previous view as the current view.
+  if(S.user&&S.recordsViewKey!==recordsKey()){$('rows').replaceChildren();$('resultInfo').textContent='';$('empty').style.display='block';$('empty').textContent='正在加载…';$('prev').disabled=$('next').disabled=true;dataStatus();return}
   let expanded=new Set([...document.querySelectorAll('.day-toggle[aria-expanded="true"]')].map(el=>el.dataset.day));for(let r of S.records)delete r._balance;
   let opening=Number(S.summary?.opening_balance||0),running=opening;
   let asc=[...S.records].reverse();
@@ -213,11 +217,37 @@ function render(){
   $('empty').style.display=S.records.length?'none':'block';$('empty').textContent=S.recordState==='loading'?'正在加载…':S.recordState==='error'?'账目未加载成功，请点击重试':'没有找到记录';$('resultInfo').textContent=`共 ${S.total} 条 · 第 ${S.page+1} 页`;$('prev').disabled=S.page===0;$('next').disabled=(S.page+1)*S.pageSize>=S.total
   for(let el of document.querySelectorAll('.day-toggle'))if(expanded.has(el.dataset.day)){el.setAttribute('aria-expanded','true');el.querySelector('.day-toggle-hint').textContent='收起当天明细';for(let row of document.querySelectorAll('.record-row,.record-card-row'))if(row.dataset.day===el.dataset.day)row.hidden=false}
 }
-async function refresh(){if(!S.user||S.authPending||S.saving||S.pendingSave)return;S.ledgerRequested=true;S.ledgerLoaded=true;await Promise.all([loadSummary(),loadRecords()])}
-function scheduleLedgerPreload(){clearTimeout(S.backgroundTimer);let epoch=S.authEpoch;S.backgroundTimer=setTimeout(()=>{if(epoch!==S.authEpoch||!S.user||S.authPending||S.saving||S.pendingSave)return;if(!S.ledgerLoaded)void refresh();void loadRules()},80)}
+function queueLedgerReads(records=true,summary=true){
+  S.pendingRecords ||= records;S.pendingSummary ||= summary;S.ledgerLoaded=false;
+  if(!S.user)return;
+  S.ledgerRequested=true;
+  if(records){S.recordsRequestId++;S.recordsAbort?.abort();if(S.recordsViewKey!==recordsKey()){S.records=[];S.total=0}S.recordsViewKey=recordsKey();S.recordState=S.records.length?'cached':'loading';render()}
+  if(summary){S.summaryRequestId++;S.summaryAbort?.abort();if(S.summaryMonth!==monthKey())S.summary=null;S.summaryMonth=monthKey();S.summaryState=S.summary?'cached':'loading';renderSummary()}
+  dataStatus();
+}
+async function flushLedgerReads(){
+  // Requests survive auth checks / saves. These owners call the preload scheduler
+  // when they finish; no polling or automatic write retry is needed.
+  if(!S.user||S.authPending||S.saving||S.pendingSave)return;
+  let records=S.pendingRecords,summary=S.pendingSummary,epoch=S.authEpoch;
+  if(!records&&!summary)return;
+  S.pendingRecords=S.pendingSummary=false;S.ledgerRequested=true;S.lastLedgerCheck=Date.now();
+  await Promise.all([summary?loadSummary():null,records?fetchRecords():null]);
+  if(epoch!==S.authEpoch)return;
+  S.ledgerLoaded=!S.pendingRecords&&!S.pendingSummary&&S.recordState==='fresh'&&S.summaryState==='fresh'&&S.recordsViewKey===recordsKey()&&S.summaryMonth===monthKey();dataStatus();
+}
+function loadRecords(delay=0){clearTimeout(S.timer);queueLedgerReads(true,false);if(delay){S.timer=setTimeout(()=>void flushLedgerReads(),delay);return}return flushLedgerReads()}
+function refresh(){clearTimeout(S.timer);queueLedgerReads();return flushLedgerReads()}
+function scheduleLedgerPreload(){clearTimeout(S.backgroundTimer);let epoch=S.authEpoch;S.backgroundTimer=setTimeout(()=>{if(epoch!==S.authEpoch||!S.user||S.authPending||S.saving||S.pendingSave)return;if(!S.ledgerLoaded&&!S.pendingRecords&&!S.pendingSummary)queueLedgerReads();if(S.recordsViewKey!==recordsKey())queueLedgerReads(true,false);if(S.summaryMonth!==monthKey())queueLedgerReads(false,true);void flushLedgerReads();void loadRules()},80)}
+function resumeLedger(force=false){
+  if(document.visibilityState==='hidden'||!S.user)return;
+  let changed=S.recordsViewKey!==recordsKey()||S.summaryMonth!==monthKey(),busy=S.pendingRecords||S.pendingSummary||[S.recordState,S.summaryState].some(s=>s==='loading'||s==='cached');
+  if(!changed&&!force&&(busy||Date.now()-S.lastLedgerCheck<30000))return;
+  void refresh();
+}
 function setImageStatus(text='',kind=''){$('imageStatus').textContent=text;$('imageStatus').className='image-status'+(kind?' '+kind:'')}
 function openOverlay(id){$(id).classList.add('show');document.body.classList.add('modal-open');syncVisualViewport()}
-function closeOverlay(id,loadLedger=true,force=false){if(id==='recordOverlay'){if(S.saving&&!force)return toast('正在提交，请等待保存结果');cancelPendingSave()}$(id).classList.remove('show');if(!document.querySelector('.overlay.show'))document.body.classList.remove('modal-open');if(id==='recordOverlay'&&loadLedger){S.ledgerRequested=true;if(S.user){if(S.ledgerDirty)render();if(!S.ledgerLoaded)void refresh()}}}
+function closeOverlay(id,loadLedger=true,force=false){if(id==='recordOverlay'){if(S.saving&&!force)return toast('正在提交，请等待保存结果');cancelPendingSave()}$(id).classList.remove('show');if(!document.querySelector('.overlay.show'))document.body.classList.remove('modal-open');if(id==='recordOverlay'&&loadLedger){S.ledgerRequested=true;if(S.user){if(S.ledgerDirty)render();if(S.pendingRecords||S.pendingSummary)void flushLedgerReads();else if(!S.ledgerLoaded||S.recordsViewKey!==recordsKey()||S.summaryMonth!==monthKey())void refresh()}}}
 function syncVisualViewport(){let vv=window.visualViewport,h=vv?.height||window.innerHeight,top=vv?.offsetTop||0;document.documentElement.style.setProperty('--vv-height',`${Math.round(h)}px`);document.documentElement.style.setProperty('--vv-top',`${Math.round(top)}px`)}
 function keepFocusedFieldVisible(){let el=document.activeElement;if(!el?.closest('.modal'))return;setTimeout(()=>el.scrollIntoView({block:'center',behavior:'smooth'}),80)}
 function localDate(now=new Date()){return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`}
@@ -302,7 +332,7 @@ async function submitEntry(intent){
     setImageStatus(writeStarted?'未确认保存结果，请先查看账本核对，勿重复新建；本页内容已保留。':'图片处理或上传失败，本页内容已保留，请重试。','error');toast(writeStarted?'未确认保存结果，请先核对账本':'保存失败：'+(e.message||'未知错误'));
   }finally{S.saving=false;updateAuth();scheduleLedgerPreload()}
 }
-function pauseLedgerReads(){clearTimeout(S.backgroundTimer);S.recordsRequestId++;S.summaryRequestId++;S.recordsAbort?.abort();S.summaryAbort?.abort();S.ledgerLoaded=false}
+function pauseLedgerReads(){clearTimeout(S.backgroundTimer);clearTimeout(S.timer);queueLedgerReads()}
 function invalidateLedger(){clearViewCache();pauseLedgerReads()}
 async function remove(id){if(!S.user)return openOverlay('loginOverlay');if(!confirm('确定删除这条记录吗？此操作不可撤销。'))return;try{let {error}=await db.from('cash_records').delete().eq('id',id);if(error)throw error;invalidateLedger();toast('已删除');void refresh()}catch{toast('删除失败，请检查网络后重试')}}
 async function exportMonth(){
@@ -367,11 +397,12 @@ window.addEventListener('beforeunload',e=>{if(S.pendingSave||S.saving||S.draftDi
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.shiftKey||e.isComposing||e.keyCode===229||e.target.tagName==='TEXTAREA'||e.target.type==='file'||!e.target.closest('#recordOverlay')||!matchMedia('(hover:hover) and (pointer:fine)').matches||!$('recordOverlay').classList.contains('show'))return;if(['INPUT','SELECT'].includes(e.target.tagName)){e.preventDefault();save(false)}});
 document.addEventListener('focusin',keepFocusedFieldVisible);window.addEventListener('resize',syncVisualViewport,{passive:true});window.visualViewport?.addEventListener('resize',()=>{syncVisualViewport();keepFocusedFieldVisible()},{passive:true});window.visualViewport?.addEventListener('scroll',syncVisualViewport,{passive:true});syncVisualViewport();
 $('prev').onclick=()=>{if(S.page){S.page--;loadRecords()}};$('next').onclick=()=>{if((S.page+1)*S.pageSize<S.total){S.page++;loadRecords()}};
-$('year').onchange=$('month').onchange=()=>{S.page=0;refresh()};$('search').oninput=()=>{clearTimeout(S.timer);S.recordsRequestId++;S.recordsAbort?.abort();S.page=0;S.timer=setTimeout(loadRecords,350)};
+$('year').onchange=$('month').onchange=()=>{S.page=0;refresh()};$('search').oninput=$('search').onsearch=()=>{S.page=0;loadRecords(350)};
 $('typeSeg').onclick=e=>{let b=e.target.closest('button');if(!b)return;[...$('typeSeg').children].forEach(x=>x.classList.remove('active'));b.classList.add('active');S.type=b.dataset.type;S.page=0;loadRecords()};
 $('scopeSeg').onclick=e=>{let b=e.target.closest('button');if(!b)return;[...$('scopeSeg').children].forEach(x=>x.classList.remove('active'));b.classList.add('active');S.scope=b.dataset.scope;S.page=0;loadRecords()};
-document.addEventListener('visibilitychange',resumeEntryDate);window.addEventListener('focus',resumeEntryDate);
-window.addEventListener('pageshow',e=>{resumeEntryDate();if(e.persisted){resetPrivateView(!!S.editing);void checkAuth()}});
+document.addEventListener('visibilitychange',()=>{resumeEntryDate();resumeLedger()});window.addEventListener('focus',()=>{resumeEntryDate();resumeLedger()});
+window.addEventListener('online',()=>resumeLedger(true));
+window.addEventListener('pageshow',e=>{resumeEntryDate();if(e.persisted){resetPrivateView(!!S.editing);void checkAuth()}else resumeLedger()});
 (function init(){let now=new Date();for(let y=2015;y<=now.getFullYear()+1;y++)$('year').add(new Option(y+'年',y,y===now.getFullYear(),y===now.getFullYear()));for(let m=1;m<=12;m++)$('month').add(new Option(m+'月',m,m===now.getMonth()+1,m===now.getMonth()+1));S.ledgerRequested=!matchMedia('(max-width:760px)').matches;renderSummary();let recovery=location.search.includes('reset=1')||location.hash.includes('type=recovery');if(!recovery)autoOpenNewRecordOnPhone();void checkAuth()})();
 </script>
 </body>
