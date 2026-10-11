@@ -4,11 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <title>出纳日记账 V2</title>
-  <meta name="app-version" content="2026-10-11-date-3">
+<meta name="app-version" content="2026-10-11-safe-1">
   <link rel="icon" type="image/png" href="./assets/account-avatar-v2.png">
   <link rel="preconnect" href="https://vgmqdvvuekfzbagjpjid.supabase.co" crossorigin>
   <link rel="preload" href="./vendor/supabase-2.116.0.js" as="script">
   <style>
+    #draftRecovery[hidden]{display:none}.receipt-preview{width:90px;display:flex;flex-direction:column;gap:4px}.receipt-preview img{width:90px;height:68px;object-fit:cover;border-radius:8px}.receipt-preview button{font-size:12px;padding:5px;min-height:32px}
     .entry-date-notice{padding:10px;border:1px solid #e4c795;border-radius:12px;background:#fff8e9;color:#745625;font-size:13px}.entry-date-notice[hidden]{display:none}.entry-date-notice p{margin:0 0 8px}.entry-date-choices{display:flex;gap:8px;flex-wrap:wrap}.entry-date-choices button{padding:7px 10px;font-size:13px}
     :root{--brand:#5e9ca0;--brand-dark:#36787c;--brand-soft:#e8f4f3;--ink:#243436;--muted:#718082;--line:#dce8e7;--paper:#ffffff;--bg:#f5f8f8;--income:#6eaa55;--expense:#dc7474;--shadow:0 14px 36px rgba(42,73,74,.09);--radius:18px}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 100% 0,#e9f5f3 0,transparent 33%),linear-gradient(135deg,#f8fafb,#f1f6f5);color:var(--ink);font:14px/1.5 "Microsoft YaHei",system-ui,-apple-system,sans-serif}
@@ -71,6 +72,7 @@
   <div class="entry-status" id="entryStatus" role="status">可以先填写，正在核验登录…</div>
   <div class="entry-actions" id="entryActions" hidden><button class="ghost" id="entryRetryBtn" hidden>重试登录核验</button><button class="ghost" id="entryLoginBtn" hidden>重新登录</button><button class="ghost" id="cancelPendingBtn" hidden>取消等待，继续修改</button></div>
   <div class="grid">
+    <div class="field full" id="draftRecovery" hidden><span>有未保存的本机草稿</span><div><button type="button" class="ghost" id="restoreDraftBtn">恢复草稿</button> <button type="button" class="ghost" id="discardDraftBtn">丢弃草稿</button></div></div>
     <div class="field"><label for="rDate">日期</label><input type="date" id="rDate" autocomplete="off"><div class="entry-date-notice" id="entryDateNotice" role="status" hidden><p id="entryDateMessage"></p><div class="entry-date-choices"><button type="button" class="ghost" id="entryDateToday">改为今天</button><button type="button" class="ghost" id="entryDateKeep">按此日期记录</button></div></div></div>
     <label class="field"><span>收入金额</span><input type="number" inputmode="decimal" min="0" step=".01" id="rIncome" placeholder="0.00"></label>
     <label class="field"><span>支出金额</span><input type="number" inputmode="decimal" min="0" step=".01" id="rExpense" placeholder="0.00"></label>
@@ -78,7 +80,7 @@
     <label class="field"><span>往来单位（自动建议，可修改）</span><input id="rPartner"></label>
     <label class="field"><span>收支分类（自动建议，可修改）</span><input id="rCategory"></label>
     <label class="field full"><span>备注</span><textarea id="rRemark" rows="2"></textarea></label>
-    <label class="field full"><span>图片凭证</span><input type="file" id="rImages" accept="image/jpeg,image/png,image/webp" multiple><span class="hint">最多 6 张，每张不超过 15MB；会自动压缩。编辑时不选图片会保留原图片，重新选择则替换。</span><span class="image-status" id="imageStatus" aria-live="polite"></span></label>
+    <div class="field full"><label for="rImages">图片凭证</label><input type="file" id="rImages" accept="image/jpeg,image/png,image/webp" multiple><span class="hint">最多 6 张，每张不超过 15MB；会自动压缩。可分次追加，移除后保存才生效。</span><div id="receiptPreviews" style="display:flex;flex-wrap:wrap;gap:8px"></div><span class="image-status" id="imageStatus" aria-live="polite"></span></div>
   </div>
   <div class="modal-actions"><span class="quick-save">按 Enter：保存并继续录入</span><button class="ghost" data-close="recordOverlay">取消</button><button class="primary" id="saveBtn">保存</button><button class="primary" id="saveNextBtn">保存并继续</button></div>
 </div></div>
@@ -101,7 +103,7 @@ const S={records:[],rules:[],scope:'month',type:'all',page:0,pageSize:500,total:
 Object.assign(S,{authState:'checking',authCheckId:0,identityVersion:0,sessionOwnerId:null,draftOwnerId:null,manualLogin:false,pendingSave:null,entryVersion:0,draftDirty:false,draftWriteId:null,ledgerDirty:false,backgroundTimer:null});
 Object.assign(S,{recordsViewKey:'',pendingRecords:false,pendingSummary:false,lastLedgerCheck:0});
 const $=id=>document.getElementById(id), money=n=>'¥'+Number(n||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
-const scripts=new Map(),CACHE_PREFIX='cash-v2-view-3:',CACHE_TTL=15*60*1000;
+const scripts=new Map(),CACHE_PREFIX='cash-v2-view-4:',CACHE_TTL=15*60*1000;
 function loadScript(src,globalName){
   if(window[globalName])return Promise.resolve(window[globalName]);
   if(scripts.has(src))return scripts.get(src);
@@ -139,7 +141,7 @@ function ensureClient(){
   }).catch(error=>{clientPromise=null;throw error});
   return clientPromise;
 }
-function clearViewCache(){try{for(let i=sessionStorage.length-1;i>=0;i--){let key=sessionStorage.key(i);if(key?.startsWith(CACHE_PREFIX))sessionStorage.removeItem(key)}}catch{}}
+function clearViewCache(){try{for(let i=sessionStorage.length-1;i>=0;i--){let key=sessionStorage.key(i);if(/^cash-v2-view-\d+:/.test(key||''))sessionStorage.removeItem(key)}}catch{}}
 function cacheKey(kind,key){return CACHE_PREFIX+JSON.stringify([S.user?.id,kind,key])}
 function readCache(kind,key){if(!S.user)return null;try{let value=JSON.parse(sessionStorage.getItem(cacheKey(kind,key)));return value&&Date.now()-value.at<CACHE_TTL&&Date.now()>=value.at?value.data:null}catch{return null}}
 function writeCache(kind,key,data){if(!S.user)return;try{let keys=Object.keys(sessionStorage).filter(k=>k.startsWith(CACHE_PREFIX));if(keys.length>=12)sessionStorage.removeItem(keys[0]);sessionStorage.setItem(cacheKey(kind,key),JSON.stringify({at:Date.now(),data}))}catch{}}
@@ -153,10 +155,11 @@ function dataStatus(){
 }
 function renderSummary(){for(let [id,key]of [['opening','opening_balance'],['income','total_income'],['expense','total_expense'],['closing','closing_balance']])$(id).textContent=S.summary?money(S.summary[key]):'—'}
 function resetPrivateView(discardDraft=false){
+  $('draftRecovery').hidden=true;
   // An expired session must not erase a new draft. Existing-record edits are private.
-  discardDraft=discardDraft||!!S.editing;cancelPendingSave();S.authCheckId++;authPromise=null;clearTimeout(S.backgroundTimer);S.summaryAbort?.abort();S.ledgerDirty=false;
+  discardDraft=discardDraft||!!S.editing;if(discardDraft)resetReceipts();cancelPendingSave();S.authCheckId++;authPromise=null;clearTimeout(S.backgroundTimer);S.summaryAbort?.abort();S.ledgerDirty=false;
   S.pendingRecords=S.pendingSummary=false;S.recordsViewKey='';S.summaryMonth='';S.lastLedgerCheck=0;
-  S.authEpoch++;S.recordsRequestId++;S.summaryRequestId++;S.recordsAbort?.abort();clearTimeout(S.timer);clearViewCache();S.user=null;S.records=[];S.rules=[];S.summary=null;S.total=0;S.ledgerLoaded=false;S.recordState=S.summaryState='idle';S.imageUrls=[];$('imageList').replaceChildren();closeOverlay('imageOverlay',false);$('rows').replaceChildren();$('resultInfo').textContent='';$('empty').style.display='block';$('empty').textContent='请登录查看账本';renderSummary();$('dataStatus').textContent='请登录查看账本';$('retryBtn').hidden=true;
+  S.authEpoch++;S.recordsRequestId++;S.summaryRequestId++;S.recordsAbort?.abort();clearTimeout(S.timer);clearViewCache();S.user=null;S.records=[];S.dayGroups=new Map();S.rules=[];S.summary=null;S.total=0;S.ledgerLoaded=false;S.recordState=S.summaryState='idle';S.imageUrls=[];$('imageList').replaceChildren();closeOverlay('imageOverlay',false);$('rows').replaceChildren();$('resultInfo').textContent='';$('empty').style.display='block';$('empty').textContent='请登录查看账本';renderSummary();$('dataStatus').textContent='请登录查看账本';$('retryBtn').hidden=true;
   if(discardDraft){S.editing=null;S.entryVersion++;S.draftDirty=false;S.draftWriteId=null;S.draftOwnerId=null;for(let id of ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark','rImages','password'])$(id).value='';closeOverlay('recordOverlay',false,true)}
 }
 const MAX_IMAGES=6,MAX_SOURCE_BYTES=15*1024*1024,MAX_UPLOAD_BYTES=3*1024*1024,ALLOWED_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp']);
@@ -183,7 +186,7 @@ async function loadSummary(){
 async function fetchRecords(){
   if(!S.user)return;let requestId=++S.recordsRequestId,epoch=S.authEpoch,key=recordsKey(),cached=readCache('records',key);S.recordsAbort?.abort();S.recordsAbort=new AbortController();
   S.recordsViewKey=key;S.records=cached?.records||[];S.total=cached?.total||0;S.recordState=cached?'cached':'loading';render();if(!cached)$('empty').textContent='正在加载…';dataStatus();
-  let q=db.from('cash_records').select('id,date,time,type,amount,summary,remark,image_url,partner,category,created_at',{count:'exact'});
+  let q=db.from('cash_records').select('id,date,time,type,amount,summary,remark,image_url,partner,category,created_at,updated_at',{count:'exact'});
   let term=$('search').value.trim(),b=bounds();if(S.scope==='month')q=q.gte('date',b.start).lt('date',b.end);
   if(S.type!=='all')q=q.eq('type',S.type);
   if(term){let safe=term.replace(/[,%()]/g,' '),amountTerm=term.replace(/[¥￥,\s]/g,'');let filters=[`summary.ilike.%${safe}%`,`remark.ilike.%${safe}%`,`partner.ilike.%${safe}%`,`category.ilike.%${safe}%`];if(/^\d+(\.\d{1,2})?$/.test(amountTerm))filters.push(`amount.eq.${amountTerm}`);q=q.or(filters.join(','))}
@@ -213,9 +216,16 @@ function render(){
   let asc=[...S.records].reverse();
   if(S.summary&&S.summaryMonth===monthKey()&&S.summaryState==='fresh'&&S.recordState==='fresh'&&S.scope==='month'&&S.type==='all'&&!$('search').value.trim()&&S.page===0&&S.total<=S.pageSize)for(let r of asc){if(marker(r.summary))continue;running+=r.type==='income'?+r.amount:-r.amount;r._balance=running}
   let groups=new Map();for(let r of S.records){let day=r.date||'未填写日期';if(!groups.has(day))groups.set(day,[]);groups.get(day).push(r)}
-  $('rows').innerHTML=[...groups].map(([day,rows])=>{let income=rows.reduce((sum,r)=>sum+(r.type==='income'&&!marker(r.summary)?+r.amount:0),0),expense=rows.reduce((sum,r)=>sum+(r.type==='expense'&&!marker(r.summary)?+r.amount:0),0);return `<tr class="day-group"><td colspan="7"><button type="button" class="day-toggle" data-day="${esc(day)}" aria-expanded="false"><span class="day-date"><span class="day-arrow" aria-hidden="true">›</span>${esc(day)}</span><span class="day-total">${rows.length} 笔 · 收入 ${money(income)} · 支出 ${money(expense)}</span><span class="day-toggle-hint">点击查看当天明细</span></button></td></tr>${rows.map(renderRecordRow).join('')}`}).join('');
+  S.dayGroups=groups;
+  $('rows').innerHTML=[...groups].map(([day,rows])=>{let income=rows.reduce((sum,r)=>sum+(r.type==='income'&&!marker(r.summary)?+r.amount:0),0),expense=rows.reduce((sum,r)=>sum+(r.type==='expense'&&!marker(r.summary)?+r.amount:0),0);return `<tr class="day-group"><td colspan="7"><button type="button" class="day-toggle" data-day="${esc(day)}" aria-expanded="false"><span class="day-date"><span class="day-arrow" aria-hidden="true">›</span>${esc(day)}</span><span class="day-total">${rows.length} 笔 · 收入 ${money(income)} · 支出 ${money(expense)}</span><span class="day-toggle-hint">点击查看当天明细</span></button></td></tr>`}).join('');
   $('empty').style.display=S.records.length?'none':'block';$('empty').textContent=S.recordState==='loading'?'正在加载…':S.recordState==='error'?'账目未加载成功，请点击重试':'没有找到记录';$('resultInfo').textContent=`共 ${S.total} 条 · 第 ${S.page+1} 页`;$('prev').disabled=S.page===0;$('next').disabled=(S.page+1)*S.pageSize>=S.total
-  for(let el of document.querySelectorAll('.day-toggle'))if(expanded.has(el.dataset.day)){el.setAttribute('aria-expanded','true');el.querySelector('.day-toggle-hint').textContent='收起当天明细';for(let row of document.querySelectorAll('.record-row,.record-card-row'))if(row.dataset.day===el.dataset.day)row.hidden=false}
+  for(let el of document.querySelectorAll('.day-toggle'))if(expanded.has(el.dataset.day))toggleDay(el,true);
+}
+function toggleDay(button,open=button.getAttribute('aria-expanded')!=='true'){
+  const group=button.closest('tr');let next=group.nextElementSibling;
+  while(next&&!next.classList.contains('day-group')){let after=next.nextElementSibling;next.remove();next=after}
+  button.setAttribute('aria-expanded',String(open));button.querySelector('.day-toggle-hint').textContent=open?'收起当天明细':'点击查看当天明细';
+  if(open){let html=(S.dayGroups?.get(button.dataset.day)||[]).map(renderRecordRow).join('');let fragment=document.createElement('tbody');fragment.innerHTML=html;let mobile=matchMedia('(max-width:760px)').matches;for(let row of [...fragment.children]){if(row.classList.contains(mobile?'record-row':'record-card-row'))row.remove();else row.hidden=false}group.after(...fragment.children)}
 }
 function queueLedgerReads(records=true,summary=true){
   S.pendingRecords ||= records;S.pendingSummary ||= summary;S.ledgerLoaded=false;
@@ -247,7 +257,7 @@ function resumeLedger(force=false){
 }
 function setImageStatus(text='',kind=''){$('imageStatus').textContent=text;$('imageStatus').className='image-status'+(kind?' '+kind:'')}
 function openOverlay(id){$(id).classList.add('show');document.body.classList.add('modal-open');syncVisualViewport()}
-function closeOverlay(id,loadLedger=true,force=false){if(id==='recordOverlay'){if(S.saving&&!force)return toast('正在提交，请等待保存结果');cancelPendingSave()}$(id).classList.remove('show');if(!document.querySelector('.overlay.show'))document.body.classList.remove('modal-open');if(id==='recordOverlay'&&loadLedger){S.ledgerRequested=true;if(S.user){if(S.ledgerDirty)render();if(S.pendingRecords||S.pendingSummary)void flushLedgerReads();else if(!S.ledgerLoaded||S.recordsViewKey!==recordsKey()||S.summaryMonth!==monthKey())void refresh()}}}
+function closeOverlay(id,loadLedger=true,force=false){if(id==='recordOverlay'){if(S.saving&&!force)return toast('正在提交，请等待保存结果');persistDraft();cancelPendingSave();S.draftDirty=false}$(id).classList.remove('show');if(!document.querySelector('.overlay.show'))document.body.classList.remove('modal-open');if(id==='recordOverlay'&&loadLedger){S.ledgerRequested=true;if(S.user){if(S.ledgerDirty)render();if(S.pendingRecords||S.pendingSummary)void flushLedgerReads();else if(!S.ledgerLoaded||S.recordsViewKey!==recordsKey()||S.summaryMonth!==monthKey())void refresh()}}}
 function syncVisualViewport(){let vv=window.visualViewport,h=vv?.height||window.innerHeight,top=vv?.offsetTop||0;document.documentElement.style.setProperty('--vv-height',`${Math.round(h)}px`);document.documentElement.style.setProperty('--vv-top',`${Math.round(top)}px`)}
 function keepFocusedFieldVisible(){let el=document.activeElement;if(!el?.closest('.modal'))return;setTimeout(()=>el.scrollIntoView({block:'center',behavior:'smooth'}),80)}
 function localDate(now=new Date()){return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`}
@@ -258,7 +268,7 @@ function hideEntryDateNotice(){entryDateState.needsConfirm=false;$('entryDateNot
 function isEntryDateConfirmed(date){return entryDateState.confirmedDate===date&&entryDateState.confirmedOn===localDate()}
 function resetEntryDate(manual=false,keepConfirmation=false){entryDateState.manual=manual;entryDateState.openedOn=localDate();entryDateState.continuingBatch=false;entryDateState.dateInteraction=false;if(!keepConfirmation){entryDateState.confirmedDate=null;entryDateState.confirmedOn=null}hideEntryDateNotice()}
 function showEntryDateNotice(){entryDateState.needsConfirm=true;$('entryDateMessage').textContent=`今天是 ${localDate()}，本笔日期是 ${$('rDate').value}，保存前请确认。`;$('entryDateNotice').hidden=false}
-function hasEntryContent(){return ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark'].some(id=>$(id).value.trim())||$('rImages').files.length>0}
+function hasEntryContent(){return ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark'].some(id=>$(id).value.trim())||(S.receiptFiles?.length||0)>0||$('rImages').files.length>0}
 function syncEntryDate(){
   if(!$('recordOverlay').classList.contains('show')||S.editing||S.pendingSave||S.saving)return;
   const date=$('rDate').value,today=localDate();
@@ -279,28 +289,61 @@ function prepareNextEntryDate(wasEditing){
   else{$('rDate').value=localDate();resetEntryDate()}
   entryDateState.continuingBatch=true;
 }
-function openRecord(r=null){if(S.saving)return;cancelPendingSave();S.entryVersion++;S.draftDirty=false;S.draftWriteId=null;S.draftOwnerId=S.user?.id||S.sessionOwnerId||null;S.editing=r;$('rPartner').dataset.manual='';$('rCategory').dataset.manual='';$('recordTitle').textContent=r?'编辑记录':'记一笔';$('rDate').value=r?.date||localDate();resetEntryDate(!!r);$('rIncome').value=r?.type==='income'?r.amount:'';$('rExpense').value=r?.type==='expense'?r.amount:'';$('rSummary').value=r?.summary||'';$('rPartner').value=r?.partner||'';$('rCategory').value=r?.category||'';$('rRemark').value=r?.remark||'';$('rImages').value='';setImageStatus('');openOverlay('recordOverlay');updateAuth();scheduleEntryDateCheck();if(matchMedia('(min-width:761px)').matches)setTimeout(()=>{$('rIncome').focus()},80)}
+function openRecord(r=null){if(S.saving)return;persistDraft();cancelPendingSave();S.entryVersion++;S.draftDirty=false;S.draftWriteId=null;S.draftIntentTime=null;S.recoveredDraft=null;S.draftOwnerId=S.user?.id||S.sessionOwnerId||null;S.editing=r;$('rPartner').dataset.manual='';$('rCategory').dataset.manual='';$('recordTitle').textContent=r?'编辑记录':'记一笔';$('rDate').value=r?.date||localDate();resetEntryDate(!!r);$('rIncome').value=r?.type==='income'?r.amount:'';$('rExpense').value=r?.type==='expense'?r.amount:'';$('rSummary').value=r?.summary||'';$('rPartner').value=r?.partner||'';$('rCategory').value=r?.category||'';$('rRemark').value=r?.remark||'';$('rImages').value='';resetReceipts(parseImages(r?.image_url));setImageStatus('');openOverlay('recordOverlay');updateAuth();refreshDraftNotice();scheduleEntryDateCheck();if(matchMedia('(min-width:761px)').matches)setTimeout(()=>{$('rIncome').focus()},80)}
+const DRAFT_PREFIX='cash-v2-draft-1:',DRAFT_FIELDS=['rDate','rIncome','rExpense','rSummary','rPartner','rCategory','rRemark'];
+let draftTabId;try{draftTabId=sessionStorage.getItem('cash-draft-tab')||uniqueId();sessionStorage.setItem('cash-draft-tab',draftTabId)}catch{draftTabId=uniqueId()}
+function draftKey(){const owner=S.user?.id||S.draftOwnerId||S.sessionOwnerId;return owner?DRAFT_PREFIX+owner+':'+draftTabId:null}
+function persistDraft(){
+  if(!S.draftDirty||!hasEntryContent())return;const key=draftKey();if(!key)return;
+  try{localStorage.setItem(key,JSON.stringify({at:Date.now(),owner:S.user?.id||S.draftOwnerId||S.sessionOwnerId,fields:Object.fromEntries(DRAFT_FIELDS.map(id=>[id,$(id).value])),editing:S.editing,id:S.draftWriteId,time:S.draftIntentTime,dateState:{...entryDateState},keptUrls:S.keptReceiptUrls||[],hadFiles:!!S.receiptFiles?.length}));$('draftRecovery').hidden=true}catch{if(!S.draftWarning){S.draftWarning=true;toast('本机无法暂存草稿，请勿刷新或关闭页面')}}
+}
+function availableDraft(){
+  if(!S.user||S.saving||S.pendingSave||S.editing||hasEntryContent())return null;
+  try{let prefix=DRAFT_PREFIX+S.user.id+':',keys=Object.keys(localStorage).filter(k=>k.startsWith(prefix));let found=keys.map(key=>({key,value:JSON.parse(localStorage.getItem(key))})).filter(x=>x.value?.owner===S.user.id&&x.value?.fields);return found.find(x=>x.key===draftKey())||found.sort((a,b)=>b.value.at-a.value.at)[0]||null}catch{return null}
+}
+function refreshDraftNotice(){$('draftRecovery').hidden=!availableDraft()}
+function clearSavedDraft(){try{const key=draftKey();if(key)localStorage.removeItem(key);let old=S.recoveredDraft;if(old&&JSON.parse(localStorage.getItem(old.key))?.at===old.at)localStorage.removeItem(old.key)}catch{}S.recoveredDraft=null;S.draftIntentTime=null}
+function clearAccountDrafts(){if(!S.user)return;try{for(const key of Object.keys(localStorage))if(key.startsWith(DRAFT_PREFIX+S.user.id+':'))localStorage.removeItem(key)}catch{}}
+function restoreDraft(){
+  const saved=availableDraft();if(!saved)return;const d=saved.value;openRecord(d.editing||null);for(const id of DRAFT_FIELDS)$(id).value=String(d.fields[id]||'');S.draftWriteId=d.id||null;S.draftIntentTime=d.time||null;S.recoveredDraft={key:saved.key,at:d.at};S.draftDirty=true;
+  if(d.dateState)Object.assign(entryDateState,d.dateState,{dateInteraction:false});resetReceipts(d.keptUrls||[]);syncEntryDate();$('draftRecovery').hidden=true;persistDraft();toast(d.hadFiles?'草稿已恢复，本机图片请重新选择':'草稿已恢复，尚未提交');
+}
+function resetReceipts(urls=[]){for(const url of S.receiptObjectUrls||[])URL.revokeObjectURL(url);S.receiptObjectUrls=[];S.receiptFiles=[];S.keptReceiptUrls=[...urls];renderReceipts()}
+function renderReceipts(){
+  for(const url of S.receiptObjectUrls||[])URL.revokeObjectURL(url);S.receiptObjectUrls=[];const box=$('receiptPreviews');box.replaceChildren();
+  const items=[...(S.keptReceiptUrls||[]).map((url,index)=>({url,index,existing:true})),...(S.receiptFiles||[]).map((file,index)=>{let url=URL.createObjectURL(file);S.receiptObjectUrls.push(url);return {url,index,existing:false}})];
+  for(const item of items){let wrap=document.createElement('div');wrap.className='receipt-preview';let img=document.createElement('img');img.src=item.url;img.alt='待保存凭证';let btn=document.createElement('button');btn.type='button';btn.className='ghost';btn.textContent='移除';btn.disabled=!!(S.saving||S.pendingSave);btn.onclick=()=>{if(S.saving||S.pendingSave)return;(item.existing?S.keptReceiptUrls:S.receiptFiles).splice(item.index,1);S.draftDirty=true;renderReceipts();persistDraft()};wrap.append(img,btn);box.append(wrap)}
+}
+function appendReceiptFiles(){
+  const files=[...$('rImages').files];$('rImages').value='';if(!files.length)return;
+  if(files.some(f=>!ALLOWED_IMAGE_TYPES.has(f.type)||f.size>MAX_SOURCE_BYTES))return setImageStatus('图片格式不支持或超过 15MB，请重新选择。','error');
+  if((S.keptReceiptUrls?.length||0)+(S.receiptFiles?.length||0)+files.length>MAX_IMAGES)return setImageStatus('总计最多 6 张，请先移除不需要的图片。','error');
+  S.receiptFiles.push(...files);S.draftDirty=true;renderReceipts();persistDraft();setImageStatus(`本次已选 ${S.receiptFiles.length} 张，保存时自动压缩上传。`);
+}
+function parseAmount(raw){if(raw==='')return 0;if(!/^\d+(?:\.\d{1,2})?$/.test(raw))throw new Error('金额最多填写两位小数');const parts=raw.split('.'),cents=Number(parts[0])*100+Number((parts[1]||'').padEnd(2,'0'));if(!Number.isSafeInteger(cents))throw new Error('金额超出可安全记录的范围');return cents/100}
+function receiptPath(url){const prefix=SUPABASE_URL+'/storage/v1/object/public/receipts/';if(!String(url).startsWith(prefix))return null;try{return decodeURIComponent(url.slice(prefix.length).split('?')[0])}catch{return null}}
+async function cleanupReceipts(urls){const paths=urls.map(receiptPath).filter(Boolean);if(!paths.length)return;try{await db.storage.from('receipts').remove(paths)}catch{/* Restricted RLS preserves referenced or foreign-owned objects. */}}
 function autoOpenNewRecordOnPhone(){if(matchMedia('(max-width:760px)').matches&&!S.ledgerRequested&&!document.querySelector('.overlay.show'))openRecord()}
 async function decodeImage(file){if('createImageBitmap'in window){try{return await createImageBitmap(file,{imageOrientation:'from-image'})}catch{}}return await new Promise((resolve,reject)=>{let url=URL.createObjectURL(file),img=new Image;img.onload=()=>{URL.revokeObjectURL(url);resolve(img)};img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error(`无法读取图片“${file.name}”，请改用 JPG、PNG 或 WebP`))};img.src=url})}
 async function compress(file){if(!ALLOWED_IMAGE_TYPES.has(file.type))throw new Error(`不支持“${file.name}”的格式，请选择 JPG、PNG 或 WebP`);if(file.size>MAX_SOURCE_BYTES)throw new Error(`“${file.name}”超过 15MB，请先裁剪后再上传`);let source=await decodeImage(file);try{let width=source.width,height=source.height,make=async(maxSide,quality)=>{let scale=Math.min(1,maxSide/Math.max(width,height)),cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(width*scale));cv.height=Math.max(1,Math.round(height*scale));let ctx=cv.getContext('2d',{alpha:false});if(!ctx)throw new Error('当前浏览器无法处理图片');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(source,0,0,cv.width,cv.height);return await new Promise(resolve=>cv.toBlob(resolve,'image/jpeg',quality))};let blob=await make(1600,.72);if(!blob)throw new Error(`压缩“${file.name}”失败`);if(blob.size>MAX_UPLOAD_BYTES)blob=await make(1280,.62);if(!blob||blob.size>MAX_UPLOAD_BYTES)throw new Error(`“${file.name}”压缩后仍超过 3MB，请先裁剪后重试`);return new File([blob],file.name.replace(/\.[^.]+$/,'.jpg'),{type:'image/jpeg',lastModified:Date.now()})}finally{source.close?.()}}
 async function prepareFiles(files=[...$('rImages').files]){if(files.length>MAX_IMAGES)throw new Error(`一次最多上传 ${MAX_IMAGES} 张图片`);let prepared=[];for(let i=0;i<files.length;i++){setImageStatus(`正在处理第 ${i+1}/${files.length} 张：${files[i].name}`,'busy');prepared.push(await compress(files[i]))}return prepared}
 function uniqueId(){return crypto.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`}
-async function uploadFiles(assertCurrent=()=>{},sourceFiles){let files=await prepareFiles(sourceFiles),urls=[],paths=[];assertCurrent();for(let i=0;i<files.length;i++){assertCurrent();let file=files[i],name=`${new Date().toISOString().slice(0,10)}/${uniqueId()}.jpg`;setImageStatus(`正在上传第 ${i+1}/${files.length} 张…`,'busy');let {error}=await db.storage.from('receipts').upload(name,file,{contentType:'image/jpeg',upsert:false});assertCurrent();if(error){error.uploadedPaths=paths;throw error}paths.push(name);urls.push(db.storage.from('receipts').getPublicUrl(name).data.publicUrl)}return {urls,paths}}
+async function uploadFiles(assertCurrent=()=>{},sourceFiles){let files=await prepareFiles(sourceFiles),urls=[],paths=[];assertCurrent();for(let i=0;i<files.length;i++){assertCurrent();let file=files[i],name=`${S.user.id}/${localDate()}/${uniqueId()}.jpg`;setImageStatus(`正在上传第 ${i+1}/${files.length} 张…`,'busy');let {error}=await db.storage.from('receipts').upload(name,file,{contentType:'image/jpeg',cacheControl:'31536000',upsert:false});assertCurrent();if(error){error.uploadedPaths=paths;throw error}paths.push(name);urls.push(db.storage.from('receipts').getPublicUrl(name).data.publicUrl)}return {urls,paths}}
 function cancelPendingSave(){if(!S.pendingSave)return;S.pendingSave=null;updateAuth()}
 function showLogin(){if(S.saving)return;cancelPendingSave();openOverlay('loginOverlay')}
 function captureEntry(closeAfterSave){
   syncEntryDate();
-  let date=$('rDate').value,income=+$('rIncome').value||0,expense=+$('rExpense').value||0,summary=$('rSummary').value.trim();
+  let date=$('rDate').value,income=parseAmount($('rIncome').value),expense=parseAmount($('rExpense').value),summary=$('rSummary').value.trim();
   // Final gate checks the actual outgoing date, even if all resume/input events were missed.
   if(!S.editing&&date&&date!==localDate()&&!isEntryDateConfirmed(date)){showEntryDateNotice();$('entryDateNotice').scrollIntoView({block:'center'});throw new Error('本笔日期不是今天，请先确认日期再保存');}
   if(!date||!summary)throw new Error('请填写日期和摘要');
   if(!Number.isFinite(income)||!Number.isFinite(expense)||income<0||expense<0)throw new Error('请填写有效的收入或支出金额');
   if(income<=0&&expense<=0)throw new Error('请填写收入或支出金额');
   if(income>0&&expense>0)throw new Error('一笔记录只能填写收入或支出其中一个金额');
-  let files=[...$('rImages').files];if(files.length>MAX_IMAGES)throw new Error(`一次最多上传 ${MAX_IMAGES} 张图片`);
+  let files=[...(S.receiptFiles||[])];if(files.length+(S.keptReceiptUrls?.length||0)>MAX_IMAGES)throw new Error(`一次最多上传 ${MAX_IMAGES} 张图片`);
   if(files.some(f=>!ALLOWED_IMAGE_TYPES.has(f.type)||f.size>MAX_SOURCE_BYTES))throw new Error('图片格式不支持或超过 15MB，请重新选择');
-  let now=new Date(),editing=S.editing;S.draftWriteId ||= `id_${uniqueId()}`;
-  return {epoch:S.authEpoch,owner:S.user?.id||S.draftOwnerId||S.sessionOwnerId,version:S.entryVersion,closeAfterSave,files,editing,id:S.draftWriteId,row:{date,amount:income>0?income:expense,summary,type:income>0?'income':'expense',partner:$('rPartner').value.trim()||null,category:$('rCategory').value.trim()||null,remark:$('rRemark').value.trim(),time:editing?.time||JSON.stringify({hour:now.getHours(),minute:now.getMinutes()})}};
+  let now=new Date(),editing=S.editing;S.draftWriteId ||= `id_${uniqueId()}`;S.draftIntentTime ||= JSON.stringify({hour:now.getHours(),minute:now.getMinutes()});persistDraft();
+  return {epoch:S.authEpoch,owner:S.user?.id||S.draftOwnerId||S.sessionOwnerId,version:S.entryVersion,closeAfterSave,files,keptUrls:[...(S.keptReceiptUrls||[])],editing,id:S.draftWriteId,row:{date,amount:income>0?income:expense,summary,type:income>0?'income':'expense',partner:$('rPartner').value.trim()||null,category:$('rCategory').value.trim()||null,remark:$('rRemark').value.trim(),time:editing?.time||S.draftIntentTime}};
 }
 function save(closeAfterSave=true){
   if(S.saving||S.pendingSave||!$('recordOverlay').classList.contains('show'))return;
@@ -320,21 +363,24 @@ async function submitEntry(intent){
   if(S.saving||S.authPending||!S.user)return;
   const {epoch,version,editing,closeAfterSave}=intent,owner=S.user.id,row={...intent.row},old=editing?parseImages(editing.image_url):[];
   const assertCurrent=()=>{if(epoch!==S.authEpoch||version!==S.entryVersion||owner!==S.user?.id)throw new Error('登录状态已变化，已停止本次操作')};
-  let uploadedPaths=[],writeStarted=false;S.saving=true;pauseLedgerReads();updateAuth();
-  try{assertCurrent();let uploaded=await uploadFiles(assertCurrent,intent.files);uploadedPaths=uploaded.paths;assertCurrent();row.image_url=JSON.stringify(uploaded.urls.length?uploaded.urls:old);
-    writeStarted=true;let q=editing?db.from('cash_records').update(row).eq('id',editing.id):db.from('cash_records').insert({...row,id:intent.id});let {error}=await q;if(error)throw error;
-    uploadedPaths=[];assertCurrent();invalidateLedger();S.draftDirty=false;S.draftWriteId=null;
-    if(closeAfterSave){S.ledgerRequested=true;closeOverlay('recordOverlay',false,true)}else{S.entryVersion++;S.editing=null;$('recordTitle').textContent='记一笔';for(let id of ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark','rImages'])$(id).value='';prepareNextEntryDate(editing);$('rPartner').dataset.manual='';$('rCategory').dataset.manual='';setImageStatus('');if(matchMedia('(min-width:761px)').matches)setTimeout(()=>{$('rIncome').focus()},50)}toast('已保存');
+  let uploadedPaths=[],writeStarted=false,writeRejected=false;S.saving=true;pauseLedgerReads();updateAuth();
+  try{assertCurrent();if(editing&&editing.updated_at===undefined)throw new Error('记录版本不完整，请刷新账本后重新编辑');let uploaded=await uploadFiles(assertCurrent,intent.files);uploadedPaths=uploaded.paths;assertCurrent();row.image_url=JSON.stringify([...(intent.keptUrls||[]),...uploaded.urls]);
+    writeStarted=true;let q;
+    if(editing){q=db.from('cash_records').update(row).eq('id',editing.id);q=editing.updated_at==null?q.is('updated_at',null):q.eq('updated_at',editing.updated_at)}else q=db.from('cash_records').insert({...row,id:intent.id});
+    let {data,error}=await q.select('id,updated_at');if(error)throw error;
+    if(!Array.isArray(data)||data.length!==1||data[0].id!==(editing?.id||intent.id)){writeRejected=true;throw new Error('这笔记录已被其他页面修改或删除，未覆盖；请核对最新账目后重新编辑')}
+    uploadedPaths=[];assertCurrent();clearSavedDraft();invalidateLedger();S.draftDirty=false;S.draftWriteId=null;void cleanupReceipts(old.filter(url=>!(intent.keptUrls||[]).includes(url)));resetReceipts();
+    if(closeAfterSave){S.ledgerRequested=true;closeOverlay('recordOverlay',false,true)}else{S.entryVersion++;S.editing=null;$('recordTitle').textContent='记一笔';for(let id of ['rIncome','rExpense','rSummary','rPartner','rCategory','rRemark','rImages'])$(id).value='';prepareNextEntryDate(editing);$('rPartner').dataset.manual='';$('rCategory').dataset.manual='';setImageStatus('');refreshDraftNotice();if(matchMedia('(min-width:761px)').matches)setTimeout(()=>{$('rIncome').focus()},50)}toast('已保存');
   }catch(e){if(epoch!==S.authEpoch||owner!==S.user?.id)return;uploadedPaths=e.uploadedPaths||uploadedPaths;
     // A missing acknowledgement is not proof of a failed write. Never auto-retry
     // or delete receipts that a committed record may already reference.
-    if(!writeStarted&&uploadedPaths.length){try{await db.storage.from('receipts').remove(uploadedPaths)}catch{}}
-    setImageStatus(writeStarted?'未确认保存结果，请先查看账本核对，勿重复新建；本页内容已保留。':'图片处理或上传失败，本页内容已保留，请重试。','error');toast(writeStarted?'未确认保存结果，请先核对账本':'保存失败：'+(e.message||'未知错误'));
+    if((!writeStarted||writeRejected)&&uploadedPaths.length){try{await db.storage.from('receipts').remove(uploadedPaths)}catch{}}
+    persistDraft();const message=writeRejected?e.message:writeStarted?'未确认保存结果，请先查看账本核对，勿重复新建；本页内容已保留。':(e.message||'保存失败，请重试');setImageStatus(message,'error');toast(message);
   }finally{S.saving=false;updateAuth();scheduleLedgerPreload()}
 }
 function pauseLedgerReads(){clearTimeout(S.backgroundTimer);clearTimeout(S.timer);queueLedgerReads()}
 function invalidateLedger(){clearViewCache();pauseLedgerReads()}
-async function remove(id){if(!S.user)return openOverlay('loginOverlay');if(!confirm('确定删除这条记录吗？此操作不可撤销。'))return;try{let {error}=await db.from('cash_records').delete().eq('id',id);if(error)throw error;invalidateLedger();toast('已删除');void refresh()}catch{toast('删除失败，请检查网络后重试')}}
+async function remove(id){if(!S.user)return openOverlay('loginOverlay');if(S.saving||S.deleting)return;const row=S.records.find(r=>String(r.id)===id);if(!row||row.updated_at===undefined)return toast('请刷新账本后重试');if(!confirm('确定删除这条记录吗？此操作不可撤销。'))return;S.deleting=true;try{let q=db.from('cash_records').delete().eq('id',id);q=row.updated_at==null?q.is('updated_at',null):q.eq('updated_at',row.updated_at);let {data,error}=await q.select('id');if(error)throw error;if(!data||data.length!==1||data[0].id!==id)throw new Error('记录已发生变化，未删除，请刷新后核对');invalidateLedger();toast('已删除');void cleanupReceipts(parseImages(row.image_url));void refresh()}catch(e){toast(e.message||'删除未确认，请核对账本后重试')}finally{S.deleting=false}}
 async function exportMonth(){
   if(!S.user)return openOverlay('loginOverlay');if(S.exporting)return;S.exporting=true;updateAuth();let b=bounds(),epoch=S.authEpoch,all=[],page=0;toast('正在准备完整月度数据…');
   try{let [XLSX,summaryResult]=await Promise.all([loadScript('./vendor/xlsx-0.18.5.js','XLSX'),db.rpc('cash_month_summary',{p_year:b.y,p_month:b.m})]);if(summaryResult.error)throw summaryResult.error;
@@ -345,7 +391,7 @@ async function exportMonth(){
 async function auth(){
   if($('doLoginBtn').disabled)return;$('doLoginBtn').disabled=true;
   let previous=S.draftOwnerId||S.sessionOwnerId;S.manualLogin=true;S.identityVersion++;resetPrivateView();S.sessionOwnerId=null;let run=S.authCheckId;S.authPending=true;S.authState='checking';updateAuth();
-  try{await ensureClient();previous ||= S.sessionOwnerId;let email=$('email').value.trim(),password=$('password').value;let {data,error}=await db.auth.signInWithPassword({email,password});if(run!==S.authCheckId)return;if(error)throw error;if(S.sessionOwnerId&&S.sessionOwnerId!==data.user.id){S.identityVersion++;resetPrivateView(true);S.authState='error';toast('账号状态发生变化，请重新核验');return}previous ||= S.draftOwnerId;if(previous&&previous!==data.user.id)resetPrivateView(true);S.user=data.user;S.sessionOwnerId=data.user.id;S.draftOwnerId=data.user.id;S.authState='ready';$('password').value='';closeOverlay('loginOverlay');autoOpenNewRecordOnPhone();toast('登录成功，请确认后保存')}
+  try{await ensureClient();previous ||= S.sessionOwnerId;let email=$('email').value.trim(),password=$('password').value;let {data,error}=await db.auth.signInWithPassword({email,password});if(run!==S.authCheckId)return;if(error)throw error;if(S.sessionOwnerId&&S.sessionOwnerId!==data.user.id){S.identityVersion++;resetPrivateView(true);S.authState='error';toast('账号状态发生变化，请重新核验');return}previous ||= S.draftOwnerId;if(previous&&previous!==data.user.id)resetPrivateView(true);S.user=data.user;S.sessionOwnerId=data.user.id;S.draftOwnerId=data.user.id;S.authState='ready';$('password').value='';closeOverlay('loginOverlay');autoOpenNewRecordOnPhone();persistDraft();refreshDraftNotice();toast('登录成功，请确认后保存')}
   catch(error){if(run===S.authCheckId){S.authState=error.status>=400&&error.status<500?'signedout':'error';toast(error.message||'登录失败，请重试')}}
   finally{S.manualLogin=false;cancelPendingSave();S.authPending=false;$('doLoginBtn').disabled=false;updateAuth();scheduleLedgerPreload()}
 }
@@ -359,6 +405,7 @@ function updateAuth(){
   $('entryRetryBtn').hidden=S.authPending||!!S.user||S.saving||S.authState!=='error';$('entryLoginBtn').hidden=S.authPending||!!S.user||S.saving;$('cancelPendingBtn').hidden=!waiting;
   $('entryActions').hidden=[...$('entryActions').children].every(el=>el.hidden);
   document.querySelectorAll('#recordOverlay .grid input,#recordOverlay .grid textarea').forEach(el=>el.disabled=busy);
+  document.querySelectorAll('#receiptPreviews button,#restoreDraftBtn,#discardDraftBtn').forEach(el=>el.disabled=busy);
   document.querySelectorAll('[data-close="recordOverlay"]').forEach(el=>el.disabled=S.saving);
   $('exportBtn').disabled=S.authPending||S.exporting||!S.user;
   if(S.user)dataStatus();else if(S.authState==='error'){$('dataStatus').textContent='登录核验未完成，请重试';$('retryBtn').hidden=false}
@@ -377,16 +424,17 @@ function checkAuth(){
     if(error&&error.name!=='AuthSessionMissingError')throw error;
     if(!data?.user){resetPrivateView();S.authPending=false;S.authState='signedout';updateAuth();return}
     if((S.sessionOwnerId&&S.sessionOwnerId!==data.user.id)||(S.draftOwnerId&&S.draftOwnerId!==data.user.id)){S.identityVersion++;resetPrivateView(true);S.authPending=false;S.authState='error';updateAuth();return}
-    S.user=data.user;S.sessionOwnerId=data.user.id;S.draftOwnerId=data.user.id;S.authPending=false;S.authState='ready';updateAuth();void consumePendingSave();scheduleLedgerPreload();
+    S.user=data.user;S.sessionOwnerId=data.user.id;S.draftOwnerId=data.user.id;S.authPending=false;S.authState='ready';updateAuth();persistDraft();refreshDraftNotice();void consumePendingSave();scheduleLedgerPreload();
   }catch(error){if(epoch!==S.authEpoch||run!==S.authCheckId)return;resetPrivateView();S.authPending=false;S.authState=error.status===401||error.status===403?'signedout':'error';updateAuth()}
   finally{clearTimeout(timer);if(authPromise===task)authPromise=null}})();authPromise=task;return task;
 }
-document.addEventListener('click',e=>{let c=e.target.closest('[data-close]');if(c)return closeOverlay(c.dataset.close);let day=e.target.closest('.day-toggle');if(day){let open=day.getAttribute('aria-expanded')==='true',next=!open;day.setAttribute('aria-expanded',String(next));day.querySelector('.day-toggle-hint').textContent=next?'收起当天明细':'点击查看当天明细';document.querySelectorAll(`.record-row[data-day="${day.dataset.day}"],.record-card-row[data-day="${day.dataset.day}"]`).forEach(row=>row.hidden=!next);return}let im=e.target.closest('.attachment');if(im){S.imageUrls=JSON.parse(im.dataset.images);showProofImage(0);openOverlay('imageOverlay')}let ed=e.target.closest('.edit');if(ed)openRecord(S.records.find(r=>String(r.id)===ed.dataset.id));let de=e.target.closest('.del');if(de)remove(de.dataset.id)})
+document.addEventListener('click',e=>{let c=e.target.closest('[data-close]');if(c)return closeOverlay(c.dataset.close);let day=e.target.closest('.day-toggle');if(day){toggleDay(day);return}let im=e.target.closest('.attachment');if(im){S.imageUrls=JSON.parse(im.dataset.images);showProofImage(0);openOverlay('imageOverlay')}let ed=e.target.closest('.edit');if(ed)openRecord(S.records.find(r=>String(r.id)===ed.dataset.id));let de=e.target.closest('.del');if(de)remove(de.dataset.id)})
 $('rSummary').addEventListener('input',()=>{let s=suggest($('rSummary').value);if(!$('rPartner').dataset.manual)$('rPartner').value=s.partner;if(!$('rCategory').dataset.manual)$('rCategory').value=s.category});['rPartner','rCategory'].forEach(id=>$(id).addEventListener('input',e=>e.target.dataset.manual='1'));
-$('rImages').addEventListener('change',()=>{let files=[...$('rImages').files];if(!files.length)return setImageStatus('');if(files.length>MAX_IMAGES)return setImageStatus(`已选择 ${files.length} 张，一次最多 ${MAX_IMAGES} 张，请重新选择。`,'error');let bad=files.find(f=>!ALLOWED_IMAGE_TYPES.has(f.type)||f.size>MAX_SOURCE_BYTES);if(bad)return setImageStatus(`“${bad.name}”格式不支持或超过 15MB，请重新选择。`,'error');setImageStatus(`已选择 ${files.length} 张，保存时会自动压缩上传。`)});
-$('addBtn').onclick=()=>openRecord();$('saveBtn').onclick=()=>save(true);$('saveNextBtn').onclick=()=>save(false);$('loginBtn').onclick=async()=>{if(S.user){if(S.saving)return toast('正在保存，请完成后再退出');if(confirm('要退出当前账号吗？')){S.identityVersion++;resetPrivateView(true);S.sessionOwnerId=null;S.authPending=false;S.authState='signedout';updateAuth();try{let {error}=await db.auth.signOut();if(error)toast('本页已清空，账号退出未完成，请重试')}catch{toast('本页已清空，账号退出未完成')}}}else showLogin()};$('doLoginBtn').onclick=auth;$('forgotBtn').onclick=sendReset;$('savePasswordBtn').onclick=savePassword;$('exportBtn').onclick=exportMonth;$('retryBtn').onclick=()=>S.user?refresh():checkAuth();
+$('rImages').addEventListener('change',appendReceiptFiles);
+$('restoreDraftBtn').onclick=restoreDraft;$('discardDraftBtn').onclick=()=>{const d=availableDraft();if(d){try{localStorage.removeItem(d.key)}catch{}}refreshDraftNotice()};
+$('addBtn').onclick=()=>openRecord();$('saveBtn').onclick=()=>save(true);$('saveNextBtn').onclick=()=>save(false);$('loginBtn').onclick=async()=>{if(S.user){if(S.saving)return toast('正在保存，请完成后再退出');if(confirm('要退出当前账号吗？')){clearAccountDrafts();S.identityVersion++;resetPrivateView(true);S.sessionOwnerId=null;S.authPending=false;S.authState='signedout';updateAuth();try{let {error}=await db.auth.signOut();if(error)toast('本页已清空，账号退出未完成，请重试')}catch{toast('本页已清空，账号退出未完成')}}}else showLogin()};$('doLoginBtn').onclick=auth;$('forgotBtn').onclick=sendReset;$('savePasswordBtn').onclick=savePassword;$('exportBtn').onclick=exportMonth;$('retryBtn').onclick=()=>S.user?refresh():checkAuth();
 $('entryRetryBtn').onclick=()=>void checkAuth();$('entryLoginBtn').onclick=showLogin;$('cancelPendingBtn').onclick=()=>{cancelPendingSave();scheduleLedgerPreload()};
-document.querySelector('#recordOverlay .grid').addEventListener('input',()=>{S.draftDirty=true;syncEntryDate()});
+document.querySelector('#recordOverlay .grid').addEventListener('input',()=>{S.draftDirty=true;syncEntryDate();persistDraft()});
 // Check before the first keystroke too: mobile browsers may omit resume events.
 for(const event of ['pointerdown','focusin','beforeinput'])$('recordOverlay').addEventListener(event,e=>{if(e.target!==$('rDate')){entryDateState.dateInteraction=false;syncEntryDate()}},{capture:true});
 for(const event of ['pointerdown','keydown'])$('rDate').addEventListener(event,e=>{if(e.isTrusted)entryDateState.dateInteraction=true});
@@ -395,9 +443,10 @@ for(const event of ['input','change'])$('rDate').addEventListener(event,e=>{
   if(e.isTrusted&&entryDateState.dateInteraction){let date=$('rDate').value;resetEntryDate(date!==localDate());entryDateState.dateInteraction=true;entryDateState.confirmedDate=date;entryDateState.confirmedOn=localDate()}
   syncEntryDate();
 });
-$('entryDateToday').onclick=()=>{if(S.pendingSave||S.saving)return;$('rDate').value=localDate();resetEntryDate();S.draftDirty=true};
-$('entryDateKeep').onclick=()=>{if(S.pendingSave||S.saving||!$('rDate').value)return;entryDateState.manual=true;entryDateState.openedOn=localDate();entryDateState.confirmedDate=$('rDate').value;entryDateState.confirmedOn=localDate();hideEntryDateNotice()};
-$('rImages').addEventListener('change',()=>{S.draftDirty=true});
+$('entryDateToday').onclick=()=>{if(S.pendingSave||S.saving)return;$('rDate').value=localDate();resetEntryDate();S.draftDirty=true;persistDraft()};
+$('entryDateKeep').onclick=()=>{if(S.pendingSave||S.saving||!$('rDate').value)return;entryDateState.manual=true;entryDateState.openedOn=localDate();entryDateState.confirmedDate=$('rDate').value;entryDateState.confirmedOn=localDate();hideEntryDateNotice();persistDraft()};
+window.addEventListener('pagehide',persistDraft);
+matchMedia('(max-width:760px)').addEventListener('change',()=>render());
 window.addEventListener('beforeunload',e=>{if(S.pendingSave||S.saving||S.draftDirty){e.preventDefault();e.returnValue=''}});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.shiftKey||e.isComposing||e.keyCode===229||e.target.tagName==='TEXTAREA'||e.target.type==='file'||!e.target.closest('#recordOverlay')||!matchMedia('(hover:hover) and (pointer:fine)').matches||!$('recordOverlay').classList.contains('show'))return;if(['INPUT','SELECT'].includes(e.target.tagName)){e.preventDefault();save(false)}});
 document.addEventListener('focusin',keepFocusedFieldVisible);window.addEventListener('resize',syncVisualViewport,{passive:true});window.visualViewport?.addEventListener('resize',()=>{syncVisualViewport();keepFocusedFieldVisible()},{passive:true});window.visualViewport?.addEventListener('scroll',syncVisualViewport,{passive:true});syncVisualViewport();
